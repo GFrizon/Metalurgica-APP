@@ -1,4 +1,3 @@
-# Metalurgica-APP
 # app.py
 import os
 os.environ["OTEL_SDK_DISABLED"] = "true"
@@ -68,6 +67,11 @@ SEED_ADMIN_PASS = _get("seed.admin_pass", "Adm1nFort3!")  # troque em produção
 REQUIRE_BCRYPT = str(_get("auth.require_bcrypt", "true")).lower() == "true"
 INIT_SCHEMA = str(_get("db.init_schema", "true")).lower() == "true"  # em prod: "false"
 
+# ======= Ajustes de performance (intervalos) =======
+# refresh padrão de 60s para reduzir re-execuções em nuvem
+REFRESH_FILA_MS = int(str(_get("ui.refresh_ms", "60000")))
+REFRESH_ADMIN_MS = int(str(_get("ui.refresh_ms_admin", "60000")))
+
 if REQUIRE_BCRYPT and not _BCRYPT_OK:
     raise RuntimeError("bcrypt é obrigatório (defina auth.require_bcrypt=false apenas em dev).")
 
@@ -88,6 +92,7 @@ st.markdown("""
 # ==============================
 @st.cache_resource(show_spinner=False)
 def get_pool():
+    # conexão mais resiliente e sem travar em rede lenta
     return MySQLConnectionPool(
         pool_name="app_pool",
         pool_size=8,
@@ -96,6 +101,8 @@ def get_pool():
         password=DB_CFG["password"],
         database=DB_CFG["database"],
         autocommit=False,
+        pool_reset_session=True,
+        connection_timeout=6,  # evita "pendurar"
     )
 
 # --- timezone com fallback (corrige erro 1298 no Windows/instalações sem tz tables) ---
@@ -358,10 +365,8 @@ def ensure_datetime_column(table: str, column: str):
         if row:
             t = (row[0]["DATA_TYPE"] or "").lower()
             if t != "datetime":
-                # migração leve: altera para DATETIME preservando valores (se eram DATE, ficam no mesmo dia às 00:00)
                 run_query(f"ALTER TABLE {table} MODIFY COLUMN {column} DATETIME NULL", commit=True)
     except Exception:
-        # não falha a inicialização por causa disso
         pass
 
 # garantir colunas adicionadas em versões antigas
@@ -683,6 +688,22 @@ def colaborador_refs_detalhe(colab_id: int) -> dict:
     }
 
 # ==============================
+# NOVO: Caches de alto impacto
+# ==============================
+@st.cache_data(ttl=10, show_spinner=False)
+def _cached_load_base():
+    return load_base()
+
+@st.cache_data(ttl=10, show_spinner=False)
+def _cached_listar_colaboradores():
+    return listar_colaboradores()
+
+@st.cache_data(ttl=10, show_spinner=False)
+def _cached_pending_info():
+    row = run_query("SELECT COUNT(*) AS c, COALESCE(MAX(id),0) AS max_id FROM solicitacoes_os WHERE status='Pendente'") or [{"c": 0, "max_id": 0}]
+    return int(row[0]["c"]), int(row[0]["max_id"])
+
+# ==============================
 # Barra lateral: Login/Logout + Menu
 # ==============================
 st.sidebar.title("Acesso")
@@ -754,14 +775,12 @@ if "_nav_to" in st.session_state:
         st.session_state.pop("_nav_to", None)
 
 def _get_pending_info():
-    row = run_query(
-        "SELECT COUNT(*) AS c, COALESCE(MAX(id),0) AS max_id FROM solicitacoes_os WHERE status='Pendente'"
-    ) or [{"c": 0, "max_id": 0}]
-    return int(row[0]["c"]), int(row[0]["max_id"])
+    # (mantido por compat; agora usando cache em quem chama)
+    return _cached_pending_info()
 
 if u["role"] == "ADMIN":
-    st_autorefresh(interval=15_000, key="autorefresh_admin_notify")
-    pend_count, pend_max_id = _get_pending_info()
+    st_autorefresh(interval=REFRESH_ADMIN_MS, key="autorefresh_admin_notify")
+    pend_count, pend_max_id = _cached_pending_info()
     last_seen = st.session_state.get("last_seen_pend_max_id", 0)
 
     if pend_count > 0:
@@ -782,7 +801,7 @@ if u["role"] == "ADMIN":
 menu = st.sidebar.radio("Menu", menu_ops, key="menu")
 
 if menu == "📋 Fila de Trabalho":
-    st_autorefresh(interval=10_000, key="autorefresh_fila")
+    st_autorefresh(interval=REFRESH_FILA_MS, key="autorefresh_fila")
 
 # ==============================
 # Util: range do mês (para arquivar robusto)
@@ -815,7 +834,9 @@ if menu == "📋 Fila de Trabalho":
     with fcol3:
         termo_busca = st.text_input("Busca livre (produto, descrição, solicitante, tipo...)").strip()
 
-    df_base, _ = load_base()
+    # >>>>>> USAR CACHE
+    df_base, _ = _cached_load_base()
+
     if df_base.empty:
         total_abertas = total_exec = total_conc = 0
     else:
@@ -844,13 +865,16 @@ if menu == "📋 Fila de Trabalho":
     if table_fila.empty:
         st.info("Nenhuma OS aberta ou em execução.")
     else:
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="xlsxwriter") as wr:
-            table_fila.to_excel(wr, sheet_name="Fila", index=False)
-        st.download_button("⬇️ Exportar Excel (fila atual)", data=buf.getvalue(),
-                           file_name="fila_trabalho.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           use_container_width=True, key="dl_fila")
+        # >>>>>> GERAR EXCEL SÓ QUANDO CLICAR
+        if st.button("⬇️ Gerar Excel desta fila", use_container_width=True, key="btn_build_xlsx_fila"):
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="xlsxwriter") as wr:
+                table_fila.to_excel(wr, sheet_name="Fila", index=False)
+            st.download_button("Baixar Excel (fila atual)",
+                               data=buf.getvalue(),
+                               file_name="fila_trabalho.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                               use_container_width=True, key="dl_fila")
         grid_with_colors(table_fila, height=520)
 
     # ======= AÇÕES (OPERADOR e ADMIN) =======
@@ -1096,7 +1120,8 @@ if menu == "📋 Fila de Trabalho":
 elif menu == "✅ Concluídas":
     st.title("✅ Ordens de serviço Concluídas — Metalúrgica Bakof Tec")
 
-    df_base, _ = load_base()
+    # >>>>>> USAR CACHE
+    df_base, _ = _cached_load_base()
     df_done = df_base[df_base["status"] == "Concluída"].copy()
 
     if df_done.empty:
@@ -1174,62 +1199,66 @@ elif menu == "✅ Concluídas":
             if table_mes.empty:
                 st.info("Não há OS concluídas neste mês.")
             else:
-                buf = io.BytesIO()
-                with pd.ExcelWriter(buf, engine="xlsxwriter") as wr:
-                    table_mes.to_excel(wr, sheet_name=f"Concluidas_{mes_sel}", index=False)
-                st.download_button(
-                    label="⬇️ Exportar Excel (mês selecionado)",
-                    data=buf.getvalue(),
-                    file_name=f"concluidas_{mes_sel}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                    key=f"dl_concluidas_{mes_sel}"
-                )
+                # >>>>>> GERAR EXCEL SÓ QUANDO CLICAR
+                if st.button("⬇️ Gerar Excel (mês selecionado)", use_container_width=True, key=f"btn_build_xlsx_{mes_sel}"):
+                    buf = io.BytesIO()
+                    with pd.ExcelWriter(buf, engine="xlsxwriter") as wr:
+                        table_mes.to_excel(wr, sheet_name=f"Concluidas_{mes_sel}", index=False)
+                    st.download_button(
+                        label="Baixar Excel (mês selecionado)",
+                        data=buf.getvalue(),
+                        file_name=f"concluidas_{mes_sel}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key=f"dl_concluidas_{mes_sel}"
+                    )
                 grid_with_colors(table_mes, height=560)
 
+                # >>>>>> GRÁFICOS SOB DEMANDA
                 st.divider()
-                st.subheader("📈 Análises (mês selecionado)")
+                with st.expander("📈 Mostrar análises (pode demorar)", expanded=False):
+                    st.subheader("📈 Análises (mês selecionado)")
 
-                if not df_mes.empty:
-                    dados = (df_mes.assign(dia=pd.to_datetime(df_mes["data_fim"]).dt.date)
-                                   .groupby(["dia","prioridade"])["id"]
-                                   .count().reset_index()
-                                   .rename(columns={"id":"total"}))
-                    if not dados.empty:
-                        df_g = pd.DataFrame(dados)
-                        fig = go.Figure()
-                        for pr in sorted(df_g["prioridade"].unique()):
-                            sub = df_g[df_g["prioridade"] == pr]
-                            fig.add_trace(go.Bar(x=sub["dia"], y=sub["total"], name=str(pr)))
-                        fig.update_layout(
-                            title=f"Concluídas por dia — {mes}/{ano}",
-                            barmode="stack",
-                            xaxis_title="Dia",
-                            yaxis_title="OS concluídas",
-                            legend_title="Prioridade",
-                            hovermode="x unified",
-                            margin=dict(l=10, r=10, t=40, b=10),
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
+                    if not df_mes.empty:
+                        dados = (df_mes.assign(dia=pd.to_datetime(df_mes["data_fim"]).dt.date)
+                                       .groupby(["dia","prioridade"])["id"]
+                                       .count().reset_index()
+                                       .rename(columns={"id":"total"}))
+                        if not dados.empty:
+                            df_g = pd.DataFrame(dados)
+                            fig = go.Figure()
+                            for pr in sorted(df_g["prioridade"].unique()):
+                                sub = df_g[df_g["prioridade"] == pr]
+                                fig.add_trace(go.Bar(x=sub["dia"], y=sub["total"], name=str(pr)))
+                            fig.update_layout(
+                                title=f"Concluídas por dia — {mes}/{ano}",
+                                barmode="stack",
+                                xaxis_title="Dia",
+                                yaxis_title="OS concluídas",
+                                legend_title="Prioridade",
+                                hovermode="x unified",
+                                margin=dict(l=10, r=10, t=40, b=10),
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
 
-                df_lt = df_mes.copy()
-                df_lt["data_abertura"] = pd.to_datetime(df_lt["data_abertura"], errors="coerce")
-                df_lt["data_fim"] = pd.to_datetime(df_lt["data_fim"], errors="coerce")
-                df_lt = df_lt.dropna(subset=["data_abertura","data_fim"])
-                if not df_lt.empty:
-                    df_lt["lead_time_dias"] = (df_lt["data_fim"].dt.date - df_lt["data_abertura"].dt.date).apply(lambda x: x.days)
-                    fig_lt = px.box(df_lt, y="lead_time_dias", points="all",
-                                    title=f"Lead time (dias) — {mes}/{ano}")
-                    fig_lt.update_layout(margin=dict(l=10, r=10, t=40, b=10), yaxis_title="Dias")
-                    st.plotly_chart(fig_lt, use_container_width=True)
+                    df_lt = df_mes.copy()
+                    df_lt["data_abertura"] = pd.to_datetime(df_lt["data_abertura"], errors="coerce")
+                    df_lt["data_fim"] = pd.to_datetime(df_lt["data_fim"], errors="coerce")
+                    df_lt = df_lt.dropna(subset=["data_abertura","data_fim"])
+                    if not df_lt.empty:
+                        df_lt["lead_time_dias"] = (df_lt["data_fim"].dt.date - df_lt["data_abertura"].dt.date).apply(lambda x: x.days)
+                        fig_lt = px.box(df_lt, y="lead_time_dias", points="all",
+                                        title=f"Lead time (dias) — {mes}/{ano}")
+                        fig_lt.update_layout(margin=dict(l=10, r=10, t=40, b=10), yaxis_title="Dias")
+                        st.plotly_chart(fig_lt, use_container_width=True)
 
-                if not df_mes.empty:
-                    df_exec = df_mes.copy()
-                    df_exec["executor_nome"] = df_exec["executor_nome"].fillna("—")
-                    agg = df_exec.groupby("executor_nome")["id"].count().reset_index().rename(columns={"id": "Total"})
-                    fig_exec = px.bar(agg.sort_values("Total", ascending=False), x="executor_nome", y="Total",
-                                      title=f"OS concluídas por executor — {mes}/{ano}")
-                    st.plotly_chart(fig_exec, use_container_width=True)
+                    if not df_mes.empty:
+                        df_exec = df_mes.copy()
+                        df_exec["executor_nome"] = df_exec["executor_nome"].fillna("—")
+                        agg = df_exec.groupby("executor_nome")["id"].count().reset_index().rename(columns={"id": "Total"})
+                        fig_exec = px.bar(agg.sort_values("Total", ascending=False), x="executor_nome", y="Total",
+                                          title=f"OS concluídas por executor — {mes}/{ano}")
+                        st.plotly_chart(fig_exec, use_container_width=True)
 
             # ----- ARQUIVAMENTOS RECENTES -----
             st.divider()
@@ -1406,7 +1435,7 @@ elif menu == "🔧 Administração":
                 st.success("OS cadastrada com sucesso!")
                 st.rerun()
         except Exception as e:
-            st.error(f"Erro ao cadastrar: {e}")
+            st.error(f"Erro ao cadastrar OS: {e}")
 
     st.subheader("📊 Produção — Visão sintetizada")
     dados = run_query("""
@@ -1452,7 +1481,8 @@ elif menu == "🔧 Administração":
     st.divider()
     st.subheader("👥 Gestão de Colaboradores")
 
-    df_colabs = listar_colaboradores()
+    # >>>>>> USAR CACHE
+    df_colabs = _cached_listar_colaboradores()
     if df_colabs.empty:
         st.info("Nenhum colaborador cadastrado ainda.")
     else:
@@ -1585,3 +1615,4 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
