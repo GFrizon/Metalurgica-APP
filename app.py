@@ -1601,7 +1601,7 @@ elif menu == "🔑 Minha Senha":
 
     if submit:
         try:
-            if not senha_atual or not nova_senha ou not conf_senha:
+            if not senha_atual or not nova_senha or not conf_senha:
                 st.warning("Preencha todos os campos.")
             elif nova_senha != conf_senha:
                 st.error("A confirmação não confere.")
