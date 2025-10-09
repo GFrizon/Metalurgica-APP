@@ -16,6 +16,13 @@ import plotly.graph_objects as go
 import re
 import io
 from datetime import datetime, timedelta
+from pathlib import Path
+
+# tomllib (Py 3.11+) / tomli (fallback) para ler .streamlit/secrets.toml
+try:
+    import tomllib as _toml
+except Exception:
+    import tomli as _toml
 
 # bcrypt obrigatório (com compat legado SHA para upgrade transparente)
 _BCRYPT_OK = True
@@ -47,25 +54,22 @@ st.set_page_config(page_title="Fila de Trabalho", layout="wide", page_icon="logo
 # Preferir st.secrets, com fallback ao .env/variáveis
 # Preferir env vars; se houver arquivo .streamlit/secrets.toml, ler de lá.
 def _get(key, default=None):
-    # 1) ENV var (RECOMENDADO no Render/Heroku/etc)
+    """
+    1) ENV var (RECOMENDADO no Render/Heroku/etc)
+    2) .streamlit/secrets.toml local (se existir)
+    3) default
+    """
+    # 1) ENV var
     env_key = key.replace(".", "_").upper()
     if env_key in os.environ:
         return os.getenv(env_key, default)
 
     # 2) secrets.toml local (opcional, apenas se o arquivo existir)
     try:
-        import os, sys
-        from pathlib import Path
-        try:
-            import tomllib  # Python 3.11+
-        except Exception:
-            import tomli as tomllib  # fallback para versões antigas
-
-        # procura o arquivo .streamlit/secrets.toml na raiz do projeto
         secrets_path = Path.cwd() / ".streamlit" / "secrets.toml"
         if secrets_path.exists():
             with open(secrets_path, "rb") as f:
-                secrets = tomllib.load(f)
+                secrets = _toml.load(f)
             cur = secrets
             for s in key.split("."):
                 cur = cur[s]
@@ -1006,7 +1010,7 @@ if menu == "📋 Fila de Trabalho":
                             cid = r["colaborador_id"]
                             tem_exec = run_query("SELECT 1 FROM ordens_servico WHERE executor_id=%s AND status='Em Execução' LIMIT 1", (cid,))
                             tem_aj   = run_query("""
-                                SELECT 1 FROM ajudantes_os a 
+                                SELECT 1 FROM ajudantes_os a
                                 JOIN ordens_servico o ON o.id=a.os_id
                                 WHERE a.colaborador_id=%s AND o.status='Em Execução' LIMIT 1
                             """, (cid,))
@@ -1597,7 +1601,7 @@ elif menu == "🔑 Minha Senha":
 
     if submit:
         try:
-            if not senha_atual or not nova_senha or not conf_senha:
+            if not senha_atual or not nova_senha ou not conf_senha:
                 st.warning("Preencha todos os campos.")
             elif nova_senha != conf_senha:
                 st.error("A confirmação não confere.")
@@ -1636,4 +1640,3 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
