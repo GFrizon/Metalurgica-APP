@@ -52,7 +52,6 @@ if USE_AGGRID:
 st.set_page_config(page_title="Fila de Trabalho", layout="wide", page_icon="logo_bakof.png")
 
 # Preferir st.secrets, com fallback ao .env/variáveis
-# Preferir env vars; se houver arquivo .streamlit/secrets.toml, ler de lá.
 def _get(key, default=None):
     """
     1) ENV var (RECOMENDADO no Render/Heroku/etc)
@@ -64,7 +63,7 @@ def _get(key, default=None):
     if env_key in os.environ:
         return os.getenv(env_key, default)
 
-    # 2) secrets.toml local (opcional, apenas se o arquivo existir)
+    # 2) secrets.toml local (opcional)
     try:
         secrets_path = Path.cwd() / ".streamlit" / "secrets.toml"
         if secrets_path.exists():
@@ -93,7 +92,7 @@ REQUIRE_BCRYPT = str(_get("auth.require_bcrypt", "true")).lower() == "true"
 INIT_SCHEMA = str(_get("db.init_schema", "true")).lower() == "true"  # em prod: "false"
 
 # ======= Ajustes de performance (intervalos) =======
-# refresh padrão de 60s para reduzir re-execuções em nuvem
+# refresh padrão de 60s (pode reduzir via env UI_REFRESH_MS=5000)
 REFRESH_FILA_MS = int(str(_get("ui.refresh_ms", "60000")))
 REFRESH_ADMIN_MS = int(str(_get("ui.refresh_ms_admin", "60000")))
 
@@ -113,6 +112,19 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================
+# Helpers de atualização instantânea
+# ==============================
+def refresh_now(nav_to: str | None = None):
+    """Limpa caches (de dados) e dispara rerun, opcionalmente navegando para outra página."""
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    if nav_to:
+        st.session_state["_nav_to"] = nav_to
+    st.rerun()
+
+# ==============================
 # Conexão MySQL: Pool + helpers
 # ==============================
 @st.cache_resource(show_spinner=False)
@@ -127,10 +139,10 @@ def get_pool():
         database=DB_CFG["database"],
         autocommit=False,
         pool_reset_session=True,
-        connection_timeout=6,  # evita "pendurar"
+        connection_timeout=6,  # evita “pendurar”
     )
 
-# --- timezone com fallback (corrige erro 1298 no Windows/instalações sem tz tables) ---
+# --- timezone com fallback (corrige erro 1298 em instâncias sem tz tables) ---
 def _set_session_tz(cur):
     try:
         cur.execute("SET time_zone='America/Sao_Paulo'")
@@ -376,7 +388,7 @@ def ensure_column(table: str, column: str, ddl_add: str):
     if not exists:
         run_query(f"ALTER TABLE {table} {ddl_add}", (), commit=True)
 
-# --- NOVO: garantir que colunas sejam DATETIME (evita HH:MM = 00:00) ---
+# --- garantir DATETIME (evita HH:MM = 00:00) ---
 def ensure_datetime_column(table: str, column: str):
     try:
         row = run_query(
@@ -410,7 +422,7 @@ for _tbl,_col,_ddl in [
     except Exception:
         pass
 
-# NOVO: garantir tipo correto (corrige times 00:00 em novos registros)
+# garantir tipo correto
 try:
     ensure_datetime_column("ordens_servico", "data_inicio")
     ensure_datetime_column("ordens_servico", "data_fim")
@@ -713,7 +725,7 @@ def colaborador_refs_detalhe(colab_id: int) -> dict:
     }
 
 # ==============================
-# NOVO: Caches de alto impacto
+# Caches de alto impacto
 # ==============================
 @st.cache_data(ttl=10, show_spinner=False)
 def _cached_load_base():
@@ -800,7 +812,6 @@ if "_nav_to" in st.session_state:
         st.session_state.pop("_nav_to", None)
 
 def _get_pending_info():
-    # (mantido por compat; agora usando cache em quem chama)
     return _cached_pending_info()
 
 if u["role"] == "ADMIN":
@@ -946,7 +957,7 @@ if menu == "📋 Fila de Trabalho":
                         aff1 = exec_rowcount("UPDATE colaboradores SET status='Em Execução' WHERE id=%s AND status='Ocioso'", (exec_id,))
                         if aff1 == 0:
                             st.warning(f"{nome_exec} não está mais ocioso.")
-                            st.rerun()
+                            refresh_now("📋 Fila de Trabalho")
 
                         # 2) mudar OS se ainda Aberta (atômico)
                         aff2 = exec_rowcount(
@@ -957,9 +968,10 @@ if menu == "📋 Fila de Trabalho":
                         if aff2 == 0:
                             exec_rowcount("UPDATE colaboradores SET status='Ocioso' WHERE id=%s AND status='Em Execução'", (exec_id,))
                             st.warning("A OS já foi iniciada por outro operador/aba.")
+                            refresh_now("📋 Fila de Trabalho")
                         else:
                             st.success(f"OS {os_iniciar} iniciada por {nome_exec}.")
-                            st.rerun()
+                            refresh_now("📋 Fila de Trabalho")
 
                     except Exception as e:
                         st.error(f"Erro ao iniciar: {e}")
@@ -1018,8 +1030,7 @@ if menu == "📋 Fila de Trabalho":
                                 run_query("UPDATE colaboradores SET status='Ocioso' WHERE id=%s", (cid,), commit=True)
 
                         st.success(f"OS {os_id} concluída.")
-                        st.session_state["_nav_to"] = "Concluídas"
-                        st.rerun()
+                        refresh_now("✅ Concluídas")
                     except Exception as e:
                         st.error(f"Erro ao encerrar: {e}")
             st.markdown('</div>', unsafe_allow_html=True)
@@ -1054,23 +1065,24 @@ if menu == "📋 Fila de Trabalho":
                         ok_os = run_query("SELECT 1 AS ok FROM ordens_servico WHERE id=%s AND status='Em Execução' AND COALESCE(arquivada,0)=0 LIMIT 1", (int(os_add_col),))
                         if not ok_os:
                             st.warning("A OS não está mais em execução.")
-                            st.rerun()
+                            refresh_now("📋 Fila de Trabalho")
 
                         aff1 = exec_rowcount("UPDATE colaboradores SET status='Em Execução' WHERE id=%s AND status='Ocioso'", (colab_id,))
                         if aff1 == 0:
                             st.warning(f"{nome_aj} não está mais ocioso.")
-                            st.rerun()
+                            refresh_now("📋 Fila de Trabalho")
 
                         try:
                             run_tx([
                                 ("INSERT INTO ajudantes_os (os_id, colaborador_id) VALUES (%s, %s)", (int(os_add_col), colab_id)),
                             ])
                             st.success(f"{nome_aj} adicionado na OS {os_add_col}.")
-                            st.rerun()
+                            refresh_now("📋 Fila de Trabalho")
                         except Exception as e:
                             exec_rowcount("UPDATE colaboradores SET status='Ocioso' WHERE id=%s AND status='Em Execução'", (colab_id,))
                             if "Duplicate" in str(e):
                                 st.info(f"{nome_aj} já é ajudante desta OS.")
+                                refresh_now("📋 Fila de Trabalho")
                             else:
                                 st.error(f"Erro ao adicionar: {e}")
 
@@ -1120,7 +1132,7 @@ if menu == "📋 Fila de Trabalho":
                         aff = exec_rowcount("DELETE FROM ajudantes_os WHERE id=%s", (aj_id,))
                         if aff == 0:
                             st.info("Esse ajudante já havia sido removido.")
-                            st.rerun()
+                            refresh_now("📋 Fila de Trabalho")
 
                         ainda_exec = run_query("SELECT 1 FROM ordens_servico WHERE executor_id=%s AND status='Em Execução' LIMIT 1", (colab_id_rm,))
                         ainda_aj   = run_query("""
@@ -1132,20 +1144,19 @@ if menu == "📋 Fila de Trabalho":
                             run_query("UPDATE colaboradores SET status='Ocioso' WHERE id=%s", (colab_id_rm,), commit=True)
 
                         st.success(f"{nome_rm} removido da OS {os_rm}.")
-                        st.rerun()
+                        refresh_now("📋 Fila de Trabalho")
                     except Exception as e:
                         st.error(f"Erro ao remover: {e}")
             st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown("—")
         if st.button("🔄 Atualizar fila", use_container_width=True):
-            st.rerun()
+            refresh_now("📋 Fila de Trabalho")
 
 # ---------- CONCLUÍDAS (com filtro de MÊS estável) ----------
 elif menu == "✅ Concluídas":
     st.title("✅ Ordens de serviço Concluídas — Metalúrgica Bakof Tec")
 
-    # >>>>>> USAR CACHE
     df_base, _ = _cached_load_base()
     df_done = df_base[df_base["status"] == "Concluída"].copy()
 
@@ -1204,7 +1215,6 @@ elif menu == "✅ Concluídas":
                 else:
                     try:
                         dt_ini, dt_fim = month_bounds_from_str(mes_sel)
-                        # arquiva apenas as que NÃO estão arquivadas (filtro por range do mês)
                         aff = exec_rowcount("""
                             UPDATE ordens_servico
                                SET arquivada=1, arquivo_nome=%s, arquivada_em=NOW(), arquivada_por=%s
@@ -1214,7 +1224,7 @@ elif menu == "✅ Concluídas":
                                AND data_fim < %s
                         """, (nome_arq.strip(), u["id"], dt_ini, dt_fim))
                         st.success(f"Arquivamento realizado: {aff} OS marcadas como arquivadas.")
-                        st.rerun()
+                        refresh_now("✅ Concluídas")
                     except Exception as e:
                         st.error(f"Erro ao arquivar: {e}")
 
@@ -1224,7 +1234,6 @@ elif menu == "✅ Concluídas":
             if table_mes.empty:
                 st.info("Não há OS concluídas neste mês.")
             else:
-                # >>>>>> GERAR EXCEL SÓ QUANDO CLICAR
                 if st.button("⬇️ Gerar Excel (mês selecionado)", use_container_width=True, key=f"btn_build_xlsx_{mes_sel}"):
                     buf = io.BytesIO()
                     with pd.ExcelWriter(buf, engine="xlsxwriter") as wr:
@@ -1333,7 +1342,7 @@ elif menu == "📝 Solicitar OS":
                 VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, 'Pendente')
             """, (u["id"], solicitante_setor, produto, tipo_servico, descricao, previsao, prioridade), commit=True)
             st.success("Solicitação enviado! Um administrador irá analisar.")
-            st.rerun()
+            refresh_now("📝 Solicitar OS")
         except Exception as e:
             st.error(f"Erro ao enviar: {e}")
 
@@ -1400,7 +1409,7 @@ elif menu == "📝 Solicitações":
                     run_query("UPDATE solicitacoes_os SET status='Rejeitada', analisado_por=%s, analisado_em=NOW() WHERE id=%s",
                              (u["id"], pick), commit=True)
                     st.success(f"Solicitação {pick} rejeitada.")
-                    st.rerun()
+                    refresh_now("📝 Solicitações")
                 else:
                     sol = run_query("SELECT * FROM solicitacoes_os WHERE id=%s", (pick,))
                     if not sol:
@@ -1422,7 +1431,7 @@ elif menu == "📝 Solicitações":
                                  (u["id"], pick))
                             ])
                             st.success(f"Solicitação {pick} aprovada e OS criada!")
-                            st.rerun()
+                            refresh_now("📋 Fila de Trabalho")
             except Exception as e:
                 st.error(f"Erro ao analisar: {e}")
 
@@ -1458,7 +1467,7 @@ elif menu == "🔧 Administração":
                     VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, 'Aberta')
                 """, (solicitante, int(responsavel_id), produto, tipo_servico, descricao, previsao, prioridade), commit=True)
                 st.success("OS cadastrada com sucesso!")
-                st.rerun()
+                refresh_now("📋 Fila de Trabalho")
         except Exception as e:
             st.error(f"Erro ao cadastrar OS: {e}")
 
@@ -1506,7 +1515,6 @@ elif menu == "🔧 Administração":
     st.divider()
     st.subheader("👥 Gestão de Colaboradores")
 
-    # >>>>>> USAR CACHE
     df_colabs = _cached_listar_colaboradores()
     if df_colabs.empty:
         st.info("Nenhum colaborador cadastrado ainda.")
@@ -1531,7 +1539,7 @@ elif menu == "🔧 Administração":
                 run_query("INSERT INTO colaboradores (nome, status) VALUES (%s, %s)",
                           (novo_nome.strip(), novo_status), commit=True)
                 st.success(f"Colaborador '{novo_nome.strip()}' adicionado.")
-                st.rerun()
+                refresh_now("🔧 Administração")
             except Exception as e:
                 st.error(f"Erro ao adicionar colaborador: {e}")
 
@@ -1573,7 +1581,7 @@ elif menu == "🔧 Administração":
                                 ("DELETE FROM colaboradores WHERE id=%s", (colab_id,))
                             ])
                             st.success(f"Colaborador '{escolha}' excluído.")
-                            st.rerun()
+                            refresh_now("🔧 Administração")
                         except Exception as e:
                             st.error(f"Erro ao excluir: {e}")
             else:
@@ -1581,7 +1589,7 @@ elif menu == "🔧 Administração":
                     try:
                         run_query("UPDATE colaboradores SET status='Inativo' WHERE id=%s", (colab_id,), commit=True)
                         st.success(f"Colaborador '{escolha}' marcado como Inativo.")
-                        st.rerun()
+                        refresh_now("🔧 Administração")
                     except Exception as e:
                         st.error(f"Erro ao inativar: {e}")
 
