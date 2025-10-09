@@ -45,15 +45,36 @@ if USE_AGGRID:
 st.set_page_config(page_title="Fila de Trabalho", layout="wide", page_icon="logo_bakof.png")
 
 # Preferir st.secrets, com fallback ao .env/variáveis
+# Preferir env vars; se houver arquivo .streamlit/secrets.toml, ler de lá.
 def _get(key, default=None):
+    # 1) ENV var (RECOMENDADO no Render/Heroku/etc)
+    env_key = key.replace(".", "_").upper()
+    if env_key in os.environ:
+        return os.getenv(env_key, default)
+
+    # 2) secrets.toml local (opcional, apenas se o arquivo existir)
     try:
-        scopes = key.split(".")
-        cur = st.secrets
-        for s in scopes:
-            cur = cur[s]
-        return cur
+        import os, sys
+        from pathlib import Path
+        try:
+            import tomllib  # Python 3.11+
+        except Exception:
+            import tomli as tomllib  # fallback para versões antigas
+
+        # procura o arquivo .streamlit/secrets.toml na raiz do projeto
+        secrets_path = Path.cwd() / ".streamlit" / "secrets.toml"
+        if secrets_path.exists():
+            with open(secrets_path, "rb") as f:
+                secrets = tomllib.load(f)
+            cur = secrets
+            for s in key.split("."):
+                cur = cur[s]
+            return cur
     except Exception:
-        return os.getenv(key.replace(".", "_").upper(), default)
+        pass
+
+    # 3) fallback
+    return default
 
 DB_CFG = {
     "host": _get("db.host", "localhost"),
