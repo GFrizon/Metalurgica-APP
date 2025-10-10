@@ -1157,9 +1157,12 @@ if menu == "📋 Fila de Trabalho":
 elif menu == "✅ Concluídas":
     st.title("✅ Ordens de serviço Concluídas — Metalúrgica Bakof Tec")
 
+    # Proteção contra base vazia (sem colunas)
     df_base, _ = _cached_load_base()
-    df_done = df_base[df_base["status"] == "Concluída"].copy()
-
+    if df_base.empty or "status" not in df_base.columns:
+        df_done = pd.DataFrame()
+    else:
+        df_done = df_base[df_base["status"].astype(str) == "Concluída"].copy()
     if df_done.empty:
         st.info("Nenhuma OS concluída até o momento.")
     else:
@@ -1512,87 +1515,104 @@ elif menu == "🔧 Administração":
         st.plotly_chart(fig, use_container_width=True)
 
     # ======= Gestão de Colaboradores =======
-    st.divider()
-    st.subheader("👥 Gestão de Colaboradores")
+st.divider()
+st.subheader("👥 Gestão de Colaboradores")
 
-    df_colabs = _cached_listar_colaboradores()
-    if df_colabs.empty:
-        st.info("Nenhum colaborador cadastrado ainda.")
+df_colabs = _cached_listar_colaboradores()
+if df_colabs.empty:
+    st.info("Nenhum colaborador cadastrado ainda.")
+else:
+    st.caption("Lista atual de colaboradores")
+    st.dataframe(
+        df_colabs.rename(columns={"id": "ID", "nome": "Nome", "status": "Status"}),
+        use_container_width=True,
+        height=280
+    )
+
+st.markdown("### ➕ Adicionar novo colaborador")
+with st.form("form_add_colab", clear_on_submit=True):
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        novo_nome = st.text_input("Nome do colaborador", placeholder="Ex.: João da Silva")
+    with col2:
+        novo_status = st.selectbox("Status inicial", ["Ocioso", "Em Execução", "Inativo"], index=0)
+    btn_add = st.form_submit_button("Adicionar", type="primary")
+
+if btn_add:
+    if not novo_nome.strip():
+        st.warning("Informe um nome válido.")
     else:
-        st.caption("Lista atual de colaboradores")
-        st.dataframe(df_colabs.rename(columns={"id":"ID","nome":"Nome","status":"Status"}),
-                     use_container_width=True, height=280)
+        try:
+            run_query(
+                "INSERT INTO colaboradores (nome, status) VALUES (%s, %s)",
+                (novo_nome.strip(), novo_status),
+                commit=True
+            )
+            st.success(f"Colaborador '{novo_nome.strip()}' adicionado.")
+            refresh_now("🔧 Administração")
+        except Exception as e:
+            st.error(f"Erro ao adicionar colaborador: {e}")
 
-    st.markdown("### ➕ Adicionar novo colaborador")
-    with st.form("form_add_colab", clear_on_submit=True):
-        col1, col2 = st.columns([2,1])
-        with col1:
-            novo_nome = st.text_input("Nome do colaborador", placeholder="Ex.: João da Silva")
-        with col2:
-            novo_status = st.selectbox("Status inicial", ["Ocioso", "Em Execução", "Inativo"], index=0)
-        btn_add = st.form_submit_button("Adicionar", type="primary")
-    if btn_add:
-        if not novo_nome.strip():
-            st.warning("Informe um nome válido.")
-        else:
-            try:
-                run_query("INSERT INTO colaboradores (nome, status) VALUES (%s, %s)",
-                          (novo_nome.strip(), novo_status), commit=True)
-                st.success(f"Colaborador '{novo_nome.strip()}' adicionado.")
-                refresh_now("🔧 Administração")
-            except Exception as e:
-                st.error(f"Erro ao adicionar colaborador: {e}")
+st.markdown("---")
+st.markdown("### 🗑️ Excluir / Inativar colaborador")
 
-    st.markdown("---")
-    st.markdown("### 🗑️ Excluir / Inativar colaborador")
-    if df_colabs.empty:
-        st.info("Não há colaboradores para excluir/inativar.")
-    else:
-        colE1, colE2, colE3 = st.columns([2,1,1])
-        with colE1:
-            nome_lista = df_colabs["nome"].tolist()
-            escolha = st.selectbox("Selecione o colaborador", nome_lista, index=0)
-            colab_id = int(df_colabs.loc[df_colabs["nome"] == escolha, "id"].iloc[0])
-            colab_status_atual = str(df_colabs.loc[df_colabs["nome"] == escolha, "status"].iloc[0])
-        with colE2:
-            acao = st.radio("Ação", ["Excluir definitivamente", "Inativar"], horizontal=False)
-        with colE3:
-            st.write("")
-            st.write(f"**Status atual:** {colab_status_atual}")
+if df_colabs.empty:
+    st.info("Não há colaboradores para excluir/inativar.")
+else:
+    colE1, colE2, colE3 = st.columns([2, 1, 1])
+    with colE1:
+        nome_lista = df_colabs["nome"].tolist()
+        escolha = st.selectbox("Selecione o colaborador", nome_lista, index=0)
+        colab_id = int(df_colabs.loc[df_colabs["nome"] == escolha, "id"].iloc[0])
+        colab_status_atual = str(df_colabs.loc[df_colabs["nome"] == escolha, "status"].iloc[0])
+    with colE2:
+        acao = st.radio("Ação", ["Excluir definitivamente", "Inativar"], horizontal=False)
+    with colE3:
+        st.write("")
+        st.write(f"**Status atual:** {colab_status_atual}")
 
-        refs = colaborador_refs_detalhe(colab_id)
-        tem_ativos = refs["ativos"] > 0
-        tem_conc = refs["concluidas"] > 0
+    # referências (ativos/concluídos)
+    refs = colaborador_refs_detalhe(colab_id)
+    tem_ativos = refs["ativos"] > 0
+    tem_conc = refs["concluidas"] > 0
 
-        btn_col1, _ = st.columns([1,3])
-        with btn_col1:
-            if acao == "Excluir definitivamente":
-                if tem_ativos:
-                    st.button("Excluir", disabled=True, use_container_width=True)
-                    st.caption("⚠️ Há vínculos em OS Abertas/Em Execução. Remova os vínculos ou conclua as OS. (Você pode Inativar temporariamente.)")
-                else:
-                    if tem_conc:
-                        st.caption(f"ℹ️ Vínculos apenas em OS concluídas ({refs['concluidas']}). Serão removidos automaticamente na exclusão.")
-                    if st.button("Excluir", type="primary", use_container_width=True):
-                        try:
-                            run_tx([
-                                ("UPDATE ordens_servico SET executor_id=NULL WHERE executor_id=%s", (colab_id,)),
-                                ("DELETE FROM ajudantes_os WHERE colaborador_id=%s", (colab_id,)),
-                                ("DELETE FROM colaboradores WHERE id=%s", (colab_id,))
-                            ])
-                            st.success(f"Colaborador '{escolha}' excluído.")
-                            refresh_now("🔧 Administração")
-                        except Exception as e:
-                            st.error(f"Erro ao excluir: {e}")
+    btn_col1, _ = st.columns([1, 3])
+    with btn_col1:
+        if acao == "Excluir definitivamente":
+            if tem_ativos:
+                st.button("Excluir", disabled=True, use_container_width=True)
+                st.caption("⚠️ Há vínculos em OS Abertas/Em Execução. Remova os vínculos ou conclua as OS. (Você pode Inativar temporariamente.)")
             else:
-                if st.button("Inativar", type="primary", use_container_width=True):
+                if tem_conc:
+                    st.caption(f"ℹ️ Vínculos apenas em OS concluídas ({refs['concluidas']}). Serão removidos automaticamente na exclusão.")
+                if st.button("Excluir", type="primary", use_container_width=True):
                     try:
-                        run_query("UPDATE colaboradores SET status='Inativo' WHERE id=%s", (colab_id,), commit=True)
-                        st.success(f"Colaborador '{escolha}' marcado como Inativo.")
+                        run_tx([
+                            # zera vínculos como executor
+                            ("UPDATE ordens_servico SET executor_id=NULL WHERE executor_id=%s", (colab_id,)),
+                            # ✅ zera vínculos como responsável (impede erro 1451 de FK)
+                            ("UPDATE ordens_servico SET responsavel_id=NULL WHERE responsavel_id=%s", (colab_id,)),
+                            # remove vínculos como ajudante
+                            ("DELETE FROM ajudantes_os WHERE colaborador_id=%s", (colab_id,)),
+                            # exclui o colaborador
+                            ("DELETE FROM colaboradores WHERE id=%s", (colab_id,))
+                        ])
+                        st.success(f"Colaborador '{escolha}' excluído.")
                         refresh_now("🔧 Administração")
                     except Exception as e:
-                        st.error(f"Erro ao inativar: {e}")
-
+                        st.error(f"Erro ao excluir: {e}")
+        else:
+            if st.button("Inativar", type="primary", use_container_width=True):
+                try:
+                    run_query(
+                        "UPDATE colaboradores SET status='Inativo' WHERE id=%s",
+                        (colab_id,),
+                        commit=True
+                    )
+                    st.success(f"Colaborador '{escolha}' marcado como Inativo.")
+                    refresh_now("🔧 Administração")
+                except Exception as e:
+                    st.error(f"Erro ao inativar: {e}")
 # ---------- MINHA SENHA ----------
 elif menu == "🔑 Minha Senha":
     st.title("🔑 Alterar minha senha")
