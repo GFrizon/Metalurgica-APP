@@ -49,7 +49,7 @@ if USE_AGGRID:
 # ==============================
 # Config
 # ==============================
-st.set_page_config(page_title="Fila de Trabalho", layout="wide", page_icon="logo_bakof.png")
+st.set_page_config(page_title="Fila de Trabalho", layout="wide", page_icon="pageicon.png")
 
 # Preferir st.secrets, com fallback ao .env/variáveis
 def _get(key, default=None):
