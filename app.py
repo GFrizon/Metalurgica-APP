@@ -49,7 +49,7 @@ if USE_AGGRID:
 # ==============================
 # Config
 # ==============================
-st.set_page_config(page_title="Fila de Trabalho", layout="wide", page_icon="pageicon.png")
+st.set_page_config(page_title="Fila de Trabalho", layout="wide", page_icon="logo_bakof.png")
 
 # Preferir st.secrets, com fallback ao .env/variáveis
 def _get(key, default=None):
@@ -748,7 +748,7 @@ st.sidebar.title("Acesso")
 # Logo pequena no sidebar (apenas na tela de login)
 if "user" not in st.session_state:
     try:
-        st.sidebar.image("logo_bakof.png", width=220)
+        st.sidebar.image("logo_bakof.png", width=250)
     except Exception:
         pass
 
