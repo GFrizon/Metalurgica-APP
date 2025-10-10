@@ -871,47 +871,65 @@ if menu == "📋 Fila de Trabalho":
         termo_busca = st.text_input("Busca livre (produto, descrição, solicitante, tipo...)").strip()
 
     # >>>>>> USAR CACHE
-    df_base, _ = _cached_load_base()
+df_base, _ = _cached_load_base()
 
-    if df_base.empty:
-        total_abertas = total_exec = total_conc = 0
-    else:
-        total_abertas = (df_base["status"] == "Aberta").sum()
-        total_exec    = (df_base["status"] == "Em Execução").sum()
-        total_conc    = (df_base["status"] == "Concluída").sum()
-    c1,c2,c3 = st.columns(3)
-    c1.metric("⏳ Abertas", total_abertas)
-    c2.metric("⚙️ Em execução", total_exec)
-    c3.metric("✅ Concluídas", total_conc)
-    st.caption("A coluna **!** mostra urgência (🚨). A coluna **Status** usa cor/emoji.")
+# Métricas seguras (quando não há OS, não há coluna 'status')
+if df_base.empty or "status" not in df_base.columns:
+    total_abertas = total_exec = total_conc = 0
+else:
+    total_abertas = (df_base["status"] == "Aberta").sum()
+    total_exec    = (df_base["status"] == "Em Execução").sum()
+    total_conc    = (df_base["status"] == "Concluída").sum()
 
-    df_fila = df_base.copy()
-    if filtro_status:
+c1, c2, c3 = st.columns(3)
+c1.metric("⏳ Abertas", total_abertas)
+c2.metric("⚙️ Em execução", total_exec)
+c3.metric("✅ Concluídas", total_conc)
+st.caption("A coluna **!** mostra urgência (🚨). A coluna **Status** usa cor/emoji.")
+
+# Filtros seguros
+df_fila = df_base.copy()
+if not df_fila.empty:
+    if filtro_status and "status" in df_fila.columns:
         df_fila = df_fila[df_fila["status"].isin(filtro_status)]
-    if filtro_resp:
+    if filtro_resp and "responsavel_nome" in df_fila.columns:
         df_fila = df_fila[df_fila["responsavel_nome"].isin(filtro_resp)]
     if termo_busca:
         t = termo_busca.lower()
-        cols_busca = ["id","produto", "descricao", "solicitante", "tipo_servico", "responsavel_nome", "executor_nome", "ajudantes"]
-        df_fila = df_fila[df_fila.apply(lambda row: any(t in str(row.get(c,"")).lower() for c in cols_busca), axis=1)]
+        possiveis = ["id","produto","descricao","solicitante","tipo_servico",
+                     "responsavel_nome","executor_nome","ajudantes"]
+        cols_busca = [c for c in possiveis if c in df_fila.columns]
+        if cols_busca:
+            df_fila = df_fila[df_fila.apply(
+                lambda row: any(t in str(row.get(c, "")).lower() for c in cols_busca),
+                axis=1
+            )]
 
+# Montagem da tabela (também segura)
+if df_fila.empty or "status" not in df_fila.columns:
+    table_fila = pd.DataFrame()
+else:
     df_fila_nao_conc = df_fila[df_fila["status"] != "Concluída"].copy()
     table_fila = view_table(df_fila_nao_conc)
 
-    if table_fila.empty:
-        st.info("Nenhuma OS aberta ou em execução.")
-    else:
-        # >>>>>> GERAR EXCEL SÓ QUANDO CLICAR
-        if st.button("⬇️ Gerar Excel desta fila", use_container_width=True, key="btn_build_xlsx_fila"):
-            buf = io.BytesIO()
-            with pd.ExcelWriter(buf, engine="xlsxwriter") as wr:
-                table_fila.to_excel(wr, sheet_name="Fila", index=False)
-            st.download_button("Baixar Excel (fila atual)",
-                               data=buf.getvalue(),
-                               file_name="fila_trabalho.xlsx",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                               use_container_width=True, key="dl_fila")
-        grid_with_colors(table_fila, height=520)
+# Renderização
+if table_fila.empty:
+    st.info("Nenhuma OS aberta ou em execução.")
+else:
+    # >>>>>> GERAR EXCEL SÓ QUANDO CLICAR
+    if st.button("⬇️ Gerar Excel desta fila", use_container_width=True, key="btn_build_xlsx_fila"):
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="xlsxwriter") as wr:
+            table_fila.to_excel(wr, sheet_name="Fila", index=False)
+        st.download_button(
+            "Baixar Excel (fila atual)",
+            data=buf.getvalue(),
+            file_name="fila_trabalho.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="dl_fila"
+        )
+    grid_with_colors(table_fila, height=520)
 
     # ======= AÇÕES (OPERADOR e ADMIN) =======
     if u["role"] in ("OPERADOR", "ADMIN"):
