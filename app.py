@@ -1393,6 +1393,7 @@ elif menu == "📝 Solicitações":
     if not require_roles({"ADMIN"}):
         st.stop()
     st.title("📝 Solicitações de OS — Aprovação")
+
     base = run_query("""
         SELECT s.*, u.nome AS solicitante_nome
         FROM solicitacoes_os s
@@ -1401,6 +1402,7 @@ elif menu == "📝 Solicitações":
         ORDER BY s.id ASC
     """) or []
     dfS = pd.DataFrame(base)
+
     if dfS.empty:
         st.info("Não há solicitações pendentes.")
     else:
@@ -1408,33 +1410,44 @@ elif menu == "📝 Solicitações":
         for c in ["data_solicitacao", "previsao", "analisado_em"]:
             if c in dfS_disp.columns:
                 dfS_disp[c] = _fmt_date_col(dfS_disp[c])
-        st.dataframe(dfS_disp[["id","data_solicitacao","solicitante_nome","solicitante_setor",
-                          "produto","tipo_servico","prioridade","previsao","descricao"]],
-                     use_container_width=True, height=400)
+        st.dataframe(
+            dfS_disp[["id", "data_solicitacao", "solicitante_nome", "solicitante_setor",
+                      "produto", "tipo_servico", "prioridade", "previsao", "descricao"]],
+            use_container_width=True, height=400
+        )
+
         st.divider()
         st.subheader("Analisar")
         ids = dfS["id"].tolist()
+
         with st.form("form_aprov", clear_on_submit=False):
             pick = st.selectbox("Solicitação", ids, index=0 if ids else None)
             resp_row = run_query("SELECT id, nome FROM colaboradores WHERE status!='Inativo' ORDER BY nome") or []
             mapa_resp = {r["nome"]: r["id"] for r in resp_row}
+
             col1, col2 = st.columns(2)
             with col1:
                 resp_nome = st.selectbox("Definir Responsável (colaborador)", list(mapa_resp.keys()) if mapa_resp else ["—"])
             with col2:
                 acao = st.radio("Ação", ["Aprovar", "Rejeitar"], horizontal=True)
+
             submit_ap = st.form_submit_button("Confirmar análise", use_container_width=True)
+
         if submit_ap and pick is not None:
             try:
                 if acao == "Rejeitar":
-                    run_query("UPDATE solicitacoes_os SET status='Rejeitada', analisado_por=%s, analisado_em=NOW() WHERE id=%s",
-                             (u["id"], pick), commit=True)
+                    run_query("""
+                        UPDATE solicitacoes_os
+                           SET status='Rejeitada', analisado_por=%s, analisado_em=NOW()
+                         WHERE id=%s
+                    """, (u["id"], pick), commit=True)
                     st.success(f"Solicitação {pick} rejeitada.")
                     refresh_now("📝 Solicitações")
+
                 else:
                     sol = run_query("SELECT * FROM solicitacoes_os WHERE id=%s", (pick,))
                     if not sol:
-                        st.error("Solicitação não encontrado.")
+                        st.error("Solicitação não encontrada.")
                     else:
                         s = sol[0]
                         resp_id = mapa_resp.get(resp_nome)
@@ -1446,8 +1459,10 @@ elif menu == "📝 Solicitações":
                                   INSERT INTO ordens_servico
                                     (data_abertura, solicitante, responsavel_id, produto, tipo_servico, descricao, previsao, prioridade, status)
                                   VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, 'Aberta')
-                                 """, ( s["solicitante_setor"], resp_id, s["produto"], s["tipo_servico"],
-                                        s["descricao"], s["previsao"], s["prioridade"] )),
+                                 """, (s["solicitante_setor"], resp_id, s["produto"], s["tipo_servico"],
+                                       s["descricao"], s["previsao"], s["prioridade"])),
+                                # ✅ Corrige bug: garante que o responsável apareça nas listas de executor/ajudante
+                                ("UPDATE colaboradores SET status='Ocioso' WHERE id=%s AND status='Inativo'", (resp_id,)),
                                 ("UPDATE solicitacoes_os SET status='Aprovada', analisado_por=%s, analisado_em=NOW() WHERE id=%s",
                                  (u["id"], pick))
                             ])
