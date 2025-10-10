@@ -1514,7 +1514,7 @@ elif menu == "🔧 Administração":
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    # ======= Gestão de Colaboradores =======
+# ======= Gestão de Colaboradores =======
 st.divider()
 st.subheader("👥 Gestão de Colaboradores")
 
@@ -1545,8 +1545,7 @@ if btn_add:
         try:
             run_query(
                 "INSERT INTO colaboradores (nome, status) VALUES (%s, %s)",
-                (novo_nome.strip(), novo_status),
-                commit=True
+                (novo_nome.strip(), novo_status), commit=True
             )
             st.success(f"Colaborador '{novo_nome.strip()}' adicionado.")
             refresh_now("🔧 Administração")
@@ -1571,7 +1570,7 @@ else:
         st.write("")
         st.write(f"**Status atual:** {colab_status_atual}")
 
-    # referências (ativos/concluídos)
+    # Referências (ativos/concluídos)
     refs = colaborador_refs_detalhe(colab_id)
     tem_ativos = refs["ativos"] > 0
     tem_conc = refs["concluidas"] > 0
@@ -1588,13 +1587,13 @@ else:
                 if st.button("Excluir", type="primary", use_container_width=True):
                     try:
                         run_tx([
-                            # zera vínculos como executor
+                            # Zera vínculos como executor
                             ("UPDATE ordens_servico SET executor_id=NULL WHERE executor_id=%s", (colab_id,)),
-                            # ✅ zera vínculos como responsável (impede erro 1451 de FK)
+                            # ✅ Zera vínculos como responsável (evita erro 1451 de FK)
                             ("UPDATE ordens_servico SET responsavel_id=NULL WHERE responsavel_id=%s", (colab_id,)),
-                            # remove vínculos como ajudante
+                            # Remove vínculos como ajudante
                             ("DELETE FROM ajudantes_os WHERE colaborador_id=%s", (colab_id,)),
-                            # exclui o colaborador
+                            # Exclui o colaborador
                             ("DELETE FROM colaboradores WHERE id=%s", (colab_id,))
                         ])
                         st.success(f"Colaborador '{escolha}' excluído.")
@@ -1604,15 +1603,13 @@ else:
         else:
             if st.button("Inativar", type="primary", use_container_width=True):
                 try:
-                    run_query(
-                        "UPDATE colaboradores SET status='Inativo' WHERE id=%s",
-                        (colab_id,),
-                        commit=True
-                    )
+                    run_query("UPDATE colaboradores SET status='Inativo' WHERE id=%s", (colab_id,), commit=True)
                     st.success(f"Colaborador '{escolha}' marcado como Inativo.")
                     refresh_now("🔧 Administração")
                 except Exception as e:
                     st.error(f"Erro ao inativar: {e}")
+# ======= FIM: Gestão de Colaboradores =======
+
 # ---------- MINHA SENHA ----------
 elif menu == "🔑 Minha Senha":
     st.title("🔑 Alterar minha senha")
