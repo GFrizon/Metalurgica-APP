@@ -932,128 +932,128 @@ if menu == "📋 Fila de Trabalho":
     grid_with_colors(table_fila, height=520)
 
     # ======= AÇÕES (OPERADOR e ADMIN) =======
-    if u["role"] in ("OPERADOR", "ADMIN"):
-        st.divider()
-        st.subheader("Ações")
+if u["role"] in ("OPERADOR", "ADMIN"):
+    st.divider()
+    st.subheader("Ações")
 
-        df_os_raw = pd.DataFrame(run_query("SELECT id, status, executor_id FROM ordens_servico WHERE COALESCE(arquivada,0)=0 ORDER BY id") or [])
-        df_ociosos = pd.DataFrame(run_query("SELECT id, nome FROM colaboradores WHERE status='Ocioso' ORDER BY nome") or [])
-        abertas_ids = df_os_raw[df_os_raw["status"]=="Aberta"]["id"].tolist() if not df_os_raw.empty else []
-        em_exec_ids = df_os_raw[df_os_raw["status"]=="Em Execução"]["id"].tolist() if not df_os_raw.empty else []
+    df_os_raw = pd.DataFrame(run_query("SELECT id, status, executor_id FROM ordens_servico WHERE COALESCE(arquivada,0)=0 ORDER BY id") or [])
+    df_ociosos = pd.DataFrame(run_query("SELECT id, nome FROM colaboradores WHERE status='Ocioso' ORDER BY nome") or [])
+    abertas_ids = df_os_raw[df_os_raw["status"]=="Aberta"]["id"].tolist() if not df_os_raw.empty else []
+    em_exec_ids = df_os_raw[df_os_raw["status"]=="Em Execução"]["id"].tolist() if not df_os_raw.empty else []
 
-        top_left, top_right = st.columns(2)
-        bottom_left, bottom_right = st.columns(2)
+    top_left, top_right = st.columns(2)
+    bottom_left, bottom_right = st.columns(2)
 
-        # -------- INICIAR --------
-        with top_left:
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.markdown("### ▶️ Iniciar Ordem de serviço")
+    # -------- INICIAR --------
+    with top_left:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### ▶️ Iniciar Ordem de serviço")
 
-            with st.form("form_iniciar_os", clear_on_submit=False):
-                if not abertas_ids:
-                    st.selectbox("Ordens (Abertas)", ["—"], index=0, disabled=True, key="sb_ini_os_disabled")
-                else:
-                    st.selectbox("Ordens (Abertas)", abertas_ids, index=0, key="sb_ini_os")
-                if df_ociosos.empty:
-                    st.selectbox("Executor (ociosos)", ["—"], disabled=True)
-                else:
-                    st.selectbox("Executor (ociosos)", df_ociosos["nome"].tolist(), key="sb_ini_exec")
-                submit_ini = st.form_submit_button("Iniciar", use_container_width=True)
+        with st.form("form_iniciar_os", clear_on_submit=False):
+            if not abertas_ids:
+                st.selectbox("Ordens (Abertas)", ["—"], index=0, disabled=True, key="sb_ini_os_disabled")
+            else:
+                st.selectbox("Ordens (Abertas)", abertas_ids, index=0, key="sb_ini_os")
+            if df_ociosos.empty:
+                st.selectbox("Executor (ociosos)", ["—"], disabled=True)
+            else:
+                st.selectbox("Executor (ociosos)", df_ociosos["nome"].tolist(), key="sb_ini_exec")
+            submit_ini = st.form_submit_button("Iniciar", use_container_width=True)
 
-            if submit_ini:
-                os_iniciar = st.session_state.get("sb_ini_os")
-                if not os_iniciar:
-                    st.warning("Escolha uma OS aberta.")
-                elif df_ociosos.empty:
-                    st.warning("Não há executores ociosos.")
-                else:
-                    try:
-                        nome_exec = st.session_state.get("sb_ini_exec")
-                        exec_id = int(df_ociosos.loc[df_ociosos["nome"] == nome_exec, "id"].iloc[0])
+        if submit_ini:
+            os_iniciar = st.session_state.get("sb_ini_os")
+            if not os_iniciar:
+                st.warning("Escolha uma OS aberta.")
+            elif df_ociosos.empty:
+                st.warning("Não há executores ociosos.")
+            else:
+                try:
+                    nome_exec = st.session_state.get("sb_ini_exec")
+                    exec_id = int(df_ociosos.loc[df_ociosos["nome"] == nome_exec, "id"].iloc[0])
 
-                        # 1) reservar executor se ainda Ocioso
-                        aff1 = exec_rowcount("UPDATE colaboradores SET status='Em Execução' WHERE id=%s AND status='Ocioso'", (exec_id,))
-                        if aff1 == 0:
-                            st.warning(f"{nome_exec} não está mais ocioso.")
-                            refresh_now("📋 Fila de Trabalho")
+                    # 1) reservar executor se ainda Ocioso
+                    aff1 = exec_rowcount("UPDATE colaboradores SET status='Em Execução' WHERE id=%s AND status='Ocioso'", (exec_id,))
+                    if aff1 == 0:
+                        st.warning(f"{nome_exec} não está mais ocioso.")
+                        refresh_now("📋 Fila de Trabalho")
 
-                        # 2) mudar OS se ainda Aberta (atômico)
-                        aff2 = exec_rowcount(
-                            "UPDATE ordens_servico SET status='Em Execução', data_inicio=NOW(), executor_id=%s "
-                            "WHERE id=%s AND status='Aberta' AND COALESCE(arquivada,0)=0",
-                            (exec_id, int(os_iniciar))
-                        )
-                        if aff2 == 0:
-                            exec_rowcount("UPDATE colaboradores SET status='Ocioso' WHERE id=%s AND status='Em Execução'", (exec_id,))
-                            st.warning("A OS já foi iniciada por outro operador/aba.")
-                            refresh_now("📋 Fila de Trabalho")
-                        else:
-                            st.success(f"OS {os_iniciar} iniciada por {nome_exec}.")
-                            refresh_now("📋 Fila de Trabalho")
+                    # 2) mudar OS se ainda Aberta (atômico)
+                    aff2 = exec_rowcount(
+                        "UPDATE ordens_servico SET status='Em Execução', data_inicio=NOW(), executor_id=%s "
+                        "WHERE id=%s AND status='Aberta' AND COALESCE(arquivada,0)=0",
+                        (exec_id, int(os_iniciar))
+                    )
+                    if aff2 == 0:
+                        exec_rowcount("UPDATE colaboradores SET status='Ocioso' WHERE id=%s AND status='Em Execução'", (exec_id,))
+                        st.warning("A OS já foi iniciada por outro operador/aba.")
+                        refresh_now("📋 Fila de Trabalho")
+                    else:
+                        st.success(f"OS {os_iniciar} iniciada por {nome_exec}.")
+                        refresh_now("📋 Fila de Trabalho")
 
-                    except Exception as e:
-                        st.error(f"Erro ao iniciar: {e}")
-            st.markdown('</div>', unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"Erro ao iniciar: {e}")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        # -------- ENCERRAR --------
-        with top_right:
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.markdown("### ✅ Encerrar Ordem de serviço")
+    # -------- ENCERRAR --------
+    with top_right:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### ✅ Encerrar Ordem de serviço")
 
-            with st.form("form_encerrar_os", clear_on_submit=False):
-                if not em_exec_ids:
-                    st.selectbox("Ordens (Em execução)", ["—"], index=0, disabled=True, key="sb_end_os_disabled")
-                else:
-                    st.selectbox("Ordens (Em execução)", em_exec_ids, index=0, key="sb_end_os")
-                st.checkbox("Confirmo o encerramento desta OS", value=False, key="chk_end_confirm")
-                submit_end = st.form_submit_button("Encerrar", use_container_width=True)
+        with st.form("form_encerrar_os", clear_on_submit=False):
+            if not em_exec_ids:
+                st.selectbox("Ordens (Em execução)", ["—"], index=0, disabled=True, key="sb_end_os_disabled")
+            else:
+                st.selectbox("Ordens (Em execução)", em_exec_ids, index=0, key="sb_end_os")
+            st.checkbox("Confirmo o encerramento desta OS", value=False, key="chk_end_confirm")
+            submit_end = st.form_submit_button("Encerrar", use_container_width=True)
 
-            if submit_end:
-                os_encerrar = st.session_state.get("sb_end_os")
-                confirmar = bool(st.session_state.get("chk_end_confirm", False))
-                if not os_encerrar:
-                    st.warning("Escolha uma OS em execução.")
-                elif not confirmar:
-                    st.warning("Marque a confirmação de encerramento.")
-                else:
-                    try:
-                        os_id = int(os_encerrar)
-                        ex_row = run_query("SELECT executor_id FROM ordens_servico WHERE id=%s", (os_id,)) or []
-                        aj_rows = run_query("SELECT colaborador_id FROM ajudantes_os WHERE os_id=%s", (os_id,)) or []
-                        exec_id = (ex_row[0]["executor_id"] if ex_row else None)
+        if submit_end:
+            os_encerrar = st.session_state.get("sb_end_os")
+            confirmar = bool(st.session_state.get("chk_end_confirm", False))
+            if not os_encerrar:
+                st.warning("Escolha uma OS em execução.")
+            elif not confirmar:
+                st.warning("Marque a confirmação de encerramento.")
+            else:
+                try:
+                    os_id = int(os_encerrar)
+                    ex_row = run_query("SELECT executor_id FROM ordens_servico WHERE id=%s", (os_id,)) or []
+                    aj_rows = run_query("SELECT colaborador_id FROM ajudantes_os WHERE os_id=%s", (os_id,)) or []
+                    exec_id = (ex_row[0]["executor_id"] if ex_row else None)
 
-                        run_tx([
-                            ("UPDATE ordens_servico SET status='Concluída', data_fim=NOW() WHERE id=%s AND status='Em Execução'", (os_id,))
-                        ])
+                    run_tx([
+                        ("UPDATE ordens_servico SET status='Concluída', data_fim=NOW() WHERE id=%s AND status='Em Execução'", (os_id,))
+                    ])
 
-                        if exec_id:
-                            ainda_exec = run_query("SELECT 1 FROM ordens_servico WHERE executor_id=%s AND status='Em Execução' LIMIT 1", (exec_id,))
-                            ainda_aj = run_query("""
-                                SELECT 1 FROM ajudantes_os a
-                                JOIN ordens_servico o ON o.id=a.os_id
-                                WHERE a.colaborador_id=%s AND o.status='Em Execução' LIMIT 1
-                            """, (exec_id,))
-                            if not ainda_exec and not ainda_aj:
-                                run_query("UPDATE colaboradores SET status='Ocioso' WHERE id=%s", (exec_id,), commit=True)
+                    if exec_id:
+                        ainda_exec = run_query("SELECT 1 FROM ordens_servico WHERE executor_id=%s AND status='Em Execução' LIMIT 1", (exec_id,))
+                        ainda_aj = run_query("""
+                            SELECT 1 FROM ajudantes_os a
+                            JOIN ordens_servico o ON o.id=a.os_id
+                            WHERE a.colaborador_id=%s AND o.status='Em Execução' LIMIT 1
+                        """, (exec_id,))
+                        if not ainda_exec and not ainda_aj:
+                            run_query("UPDATE colaboradores SET status='Ocioso' WHERE id=%s", (exec_id,), commit=True)
 
-                        for r in aj_rows:
-                            cid = r["colaborador_id"]
-                            tem_exec = run_query("SELECT 1 FROM ordens_servico WHERE executor_id=%s AND status='Em Execução' LIMIT 1", (cid,))
-                            tem_aj   = run_query("""
-                                SELECT 1 FROM ajudantes_os a
-                                JOIN ordens_servico o ON o.id=a.os_id
-                                WHERE a.colaborador_id=%s AND o.status='Em Execução' LIMIT 1
-                            """, (cid,))
-                            if not tem_exec and not tem_aj:
-                                run_query("UPDATE colaboradores SET status='Ocioso' WHERE id=%s", (cid,), commit=True)
+                    for r in aj_rows:
+                        cid = r["colaborador_id"]
+                        tem_exec = run_query("SELECT 1 FROM ordens_servico WHERE executor_id=%s AND status='Em Execução' LIMIT 1", (cid,))
+                        tem_aj   = run_query("""
+                            SELECT 1 FROM ajudantes_os a
+                            JOIN ordens_servico o ON o.id=a.os_id
+                            WHERE a.colaborador_id=%s AND o.status='Em Execução' LIMIT 1
+                        """, (cid,))
+                        if not tem_exec and not tem_aj:
+                            run_query("UPDATE colaboradores SET status='Ocioso' WHERE id=%s", (cid,), commit=True)
 
-                        st.success(f"OS {os_id} concluída.")
-                        refresh_now("✅ Concluídas")
-                    except Exception as e:
-                        st.error(f"Erro ao encerrar: {e}")
-            st.markdown('</div>', unsafe_allow_html=True)
+                    st.success(f"OS {os_id} concluída.")
+                    refresh_now("✅ Concluídas")
+                except Exception as e:
+                    st.error(f"Erro ao encerrar: {e}")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        # -------- ADICIONAR --------
+    # -------- ADICIONAR --------
     with bottom_left:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown("### ➕ Adicionar colaborador")
@@ -1131,69 +1131,68 @@ if menu == "📋 Fila de Trabalho":
 
         st.markdown("</div>", unsafe_allow_html=True)
 
+    # -------- REMOVER --------
+    with bottom_right:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### 🗑️ Remover colaborador")
 
-        # -------- REMOVER --------
-        with bottom_right:
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.markdown("### 🗑️ Remover colaborador")
-
-            with st.form("form_rm_col", clear_on_submit=False):
-                if not em_exec_ids:
-                    st.selectbox("OS (Em execução)", ["—"], index=0, disabled=True, key="sb_rm_os_disabled")
-                    os_rm_val = None
-                else:
-                    st.selectbox("OS (Em execução)", em_exec_ids, index=0, key="sb_rm_os")
-                    os_rm_val = st.session_state.get("sb_rm_os")
-                if not os_rm_val:
+        with st.form("form_rm_col", clear_on_submit=False):
+            if not em_exec_ids:
+                st.selectbox("OS (Em execução)", ["—"], index=0, disabled=True, key="sb_rm_os_disabled")
+                os_rm_val = None
+            else:
+                st.selectbox("OS (Em execução)", em_exec_ids, index=0, key="sb_rm_os")
+                os_rm_val = st.session_state.get("sb_rm_os")
+            if not os_rm_val:
+                st.selectbox("Ajudante", ["—"], disabled=True)
+            else:
+                aj_all = pd.DataFrame(run_query("""
+                    SELECT a.id, a.os_id, c.nome, a.colaborador_id
+                    FROM ajudantes_os a
+                    JOIN colaboradores c ON c.id = a.colaborador_id
+                    WHERE a.os_id=%s
+                    ORDER BY c.nome
+                """, (int(os_rm_val),)) or [])
+                if aj_all.empty:
                     st.selectbox("Ajudante", ["—"], disabled=True)
                 else:
-                    aj_all = pd.DataFrame(run_query("""
-                        SELECT a.id, a.os_id, c.nome, a.colaborador_id
-                        FROM ajudantes_os a
-                        JOIN colaboradores c ON c.id = a.colaborador_id
-                        WHERE a.os_id=%s
-                        ORDER BY c.nome
-                    """, (int(os_rm_val),)) or [])
-                    if aj_all.empty:
-                        st.selectbox("Ajudante", ["—"], disabled=True)
-                    else:
-                        st.selectbox("Ajudante", aj_all["nome"].tolist(), key="sb_rm_col")
-                submit_rm = st.form_submit_button("Remover", use_container_width=True)
+                    st.selectbox("Ajudante", aj_all["nome"].tolist(), key="sb_rm_col")
+            submit_rm = st.form_submit_button("Remover", use_container_width=True)
 
-            if submit_rm:
-                os_rm = st.session_state.get("sb_rm_os")
-                nome_rm = st.session_state.get("sb_rm_col")
-                if not os_rm:
-                    st.warning("Escolha a OS.")
-                elif 'aj_all' not in locals() or aj_all.empty or not nome_rm:
-                    st.warning("Não há ajudantes para remover.")
-                else:
-                    try:
-                        aj_id = int(aj_all[aj_all["nome"] == nome_rm]["id"].iloc[0])
-                        colab_id_rm = int(aj_all[aj_all["nome"] == nome_rm]["colaborador_id"].iloc[0])
-                        aff = exec_rowcount("DELETE FROM ajudantes_os WHERE id=%s", (aj_id,))
-                        if aff == 0:
-                            st.info("Esse ajudante já havia sido removido.")
-                            refresh_now("📋 Fila de Trabalho")
-
-                        ainda_exec = run_query("SELECT 1 FROM ordens_servico WHERE executor_id=%s AND status='Em Execução' LIMIT 1", (colab_id_rm,))
-                        ainda_aj   = run_query("""
-                            SELECT 1 FROM ajudantes_os a 
-                            JOIN ordens_servico o ON o.id=a.os_id
-                            WHERE a.colaborador_id=%s AND o.status='Em Execução' LIMIT 1
-                        """, (colab_id_rm,))
-                        if not ainda_exec and not ainda_aj:
-                            run_query("UPDATE colaboradores SET status='Ocioso' WHERE id=%s", (colab_id_rm,), commit=True)
-
-                        st.success(f"{nome_rm} removido da OS {os_rm}.")
+        if submit_rm:
+            os_rm = st.session_state.get("sb_rm_os")
+            nome_rm = st.session_state.get("sb_rm_col")
+            if not os_rm:
+                st.warning("Escolha a OS.")
+            elif 'aj_all' not in locals() or aj_all.empty or not nome_rm:
+                st.warning("Não há ajudantes para remover.")
+            else:
+                try:
+                    aj_id = int(aj_all[aj_all["nome"] == nome_rm]["id"].iloc[0])
+                    colab_id_rm = int(aj_all[aj_all["nome"] == nome_rm]["colaborador_id"].iloc[0])
+                    aff = exec_rowcount("DELETE FROM ajudantes_os WHERE id=%s", (aj_id,))
+                    if aff == 0:
+                        st.info("Esse ajudante já havia sido removido.")
                         refresh_now("📋 Fila de Trabalho")
-                    except Exception as e:
-                        st.error(f"Erro ao remover: {e}")
-            st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown("—")
-        if st.button("🔄 Atualizar fila", use_container_width=True):
-            refresh_now("📋 Fila de Trabalho")
+                    ainda_exec = run_query("SELECT 1 FROM ordens_servico WHERE executor_id=%s AND status='Em Execução' LIMIT 1", (colab_id_rm,))
+                    ainda_aj   = run_query("""
+                        SELECT 1 FROM ajudantes_os a 
+                        JOIN ordens_servico o ON o.id=a.os_id
+                        WHERE a.colaborador_id=%s AND o.status='Em Execução' LIMIT 1
+                    """, (colab_id_rm,))
+                    if not ainda_exec and not ainda_aj:
+                        run_query("UPDATE colaboradores SET status='Ocioso' WHERE id=%s", (colab_id_rm,), commit=True)
+
+                    st.success(f"{nome_rm} removido da OS {os_rm}.")
+                    refresh_now("📋 Fila de Trabalho")
+                except Exception as e:
+                    st.error(f"Erro ao remover: {e}")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("—")
+    if st.button("🔄 Atualizar fila", use_container_width=True):
+        refresh_now("📋 Fila de Trabalho")
 
 # ---------- CONCLUÍDAS (com filtro de MÊS estável) ----------
 elif menu == "✅ Concluídas":
