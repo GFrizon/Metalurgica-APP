@@ -752,24 +752,79 @@ def view_table(df: pd.DataFrame) -> pd.DataFrame:
 
     return view
 
-def styler_for_table(df_view: pd.DataFrame):
-    if df_view.empty: return df_view
-    def zebra_and_status(row):
-        idx = row.name
-        bg = "rgba(255,255,255,0.06)" if idx % 2 == 0 else "rgba(255,255,255,0.12)"
-        s = str(row.get("Status",""))
-        if s.startswith("🟥"): bg = "rgba(255, 87, 87, 0.18)"
-        elif s.startswith("🟧"): bg = "rgba(255, 165, 0, 0.18)"
-        elif s.startswith("🟦"): bg = "rgba(100, 181, 246, 0.18)"
-        elif s.startswith("🟪"): bg = "rgba(186, 104, 200, 0.20)"
-        elif s.startswith("🟨"): bg = "rgba(255, 235, 59, 0.18)"
-        elif s.startswith("🟩"): bg = "rgba(76, 175, 80, 0.18)"
-        styles = [f"background-color: {bg}; border-bottom: 2px solid rgba(128,128,128,0.35);"] * len(row)
-        return styles
-    styled = (df_view.style
-              .apply(zebra_and_status, axis=1)
-              .set_properties(**{"white-space":"pre-wrap"}))
-    return styled
+def styler_for_table(df_view: pd.DataFrame, compact: bool = True):
+    """
+    Linha inteira bem colorida por Status (forte) e texto sempre branco.
+    Ajuste a força pelo ROW_ALPHA (hex): '66'≈40%, '80'≈50%, '8F'≈56%, '99'≈60%.
+    """
+    if df_view.empty:
+        return df_view
+
+    df = df_view.copy()
+
+    # (opcional) encurta a descrição pra leitura
+    if "Descrição do Serviço" in df.columns:
+        s = df["Descrição do Serviço"].astype(str)
+        df["Descrição do Serviço"] = s.str.slice(0, 120) + s.map(lambda x: "…" if len(x) > 120 else "")
+
+    # Paleta base (dark, light)
+    COLORS = {
+        "green":  ("#2e7d32", "#66bb6a"),   # Concluída
+        "blue":   ("#1565c0", "#42a5f5"),   # Em execução
+        "purple": ("#6a1b9a", "#ab47bc"),   # Em execução — atrasada
+        "red":    ("#c62828", "#ef5350"),   # Atrasada
+        "orange": ("#ef6c00", "#ffa726"),   # Vence hoje
+        "yellow": ("#ffb300", "#ffd54f"),   # Aberta
+        "neutral":("#5f6b7a", "#90a4ae"),
+    }
+
+    # Força do preenchimento da LINHA (alpha em HEX)
+    ROW_ALPHA = "8F"   # ← deixe ainda mais forte com "99" (≈60%) ou "B3" (≈70%)
+
+    def _cat_from_status(s: str) -> str:
+        s0 = str(s or "").lower()
+        if "🟩" in s or "concluída" in s0: return "green"
+        if "🟪" in s or ("em execução" in s0 and "atras" in s0): return "purple"
+        if "🟦" in s or ("em execução" in s0 and "atras" not in s0): return "blue"
+        if "🟥" in s or "atrasada" in s0: return "red"
+        if "🟧" in s or "vence hoje" in s0: return "orange"
+        if "🟨" in s or "aberta" in s0: return "yellow"
+        return "neutral"
+
+    # Linha inteira forte + texto branco
+    def row_style_all_white(row):
+        status_val = row.get("Status", "")
+        cat = _cat_from_status(status_val)
+        dark, light = COLORS[cat]
+        # usar a COR ESCURA com alpha alto p/ garantir contraste com texto branco
+        bg = f"background-color:{dark}{ROW_ALPHA};"
+        txt = "color:#FFFFFF;"
+        border = "border-bottom: 2px solid rgba(0,0,0,0.25);"
+        return [f"{bg} {txt} {border}"] * len(row)
+
+    # Atraso: mantém branco, em negrito (p/ não brigar com a linha)
+    def _atraso_style(val: str) -> str:
+        try:
+            if val == "—": return "color:#FFFFFF;font-weight:700;"
+            int(val)  # valida
+            return "color:#FFFFFF;font-weight:900;text-shadow:0 0 6px rgba(0,0,0,0.25);"
+        except Exception:
+            return "color:#FFFFFF;"
+
+    stl = df.style
+    stl = stl.apply(row_style_all_white, axis=1)
+
+    if "Atraso (d)" in df.columns:
+        stl = stl.applymap(_atraso_style, subset=["Atraso (d)"])
+
+    stl = (stl
+           .set_properties(**{"white-space":"pre-wrap"})
+           .set_table_styles([{"selector":"th","props":[("font-weight","900"),("letter-spacing",".2px")]}]))
+
+    if compact:
+        stl = stl.set_table_attributes('class="compact-table"')
+
+    return stl
 
 def grid_with_colors(df: pd.DataFrame, height=520):
     if df.empty:
