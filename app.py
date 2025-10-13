@@ -1046,7 +1046,7 @@ if menu == "📋 Fila de Trabalho":
                                 run_query("UPDATE colaboradores SET status='Ocioso' WHERE id=%s", (cid,), commit=True)
 
                         st.success(f"OS {os_id} concluída.")
-                        refresh_now("✅ Concluídas")
+                        refresh_now("📋 Fila de Trabalho")
                     except Exception as e:
                         st.error(f"Erro ao encerrar: {e}")
             st.markdown('</div>', unsafe_allow_html=True)
