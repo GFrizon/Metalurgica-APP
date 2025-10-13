@@ -99,17 +99,126 @@ REFRESH_ADMIN_MS = int(str(_get("ui.refresh_ms_admin", "60000")))
 if REQUIRE_BCRYPT and not _BCRYPT_OK:
     raise RuntimeError("bcrypt é obrigatório (defina auth.require_bcrypt=false apenas em dev).")
 
-# ======= CSS global =======
+# ======= TEMA BAKOF (visual) =======
 st.markdown("""
 <style>
-.card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 12px; padding: 16px 16px 10px 16px; margin-bottom: 14px; }
-.card h3, .card h2, .card h4 { margin: 0 0 10px 0; font-weight: 700; }
-.stButton > button, .stForm button[kind="primary"] { height: 48px; font-size: 18px; font-weight: 600; border-radius: 10px; }
-[data-baseweb="select"] > div, .stTextInput > div > div, .stDateInput > div, .stNumberInput > div { min-height: 44px; }
-.dataframe td, .dataframe th { border-bottom: 2px solid rgba(128,128,128,0.35) !important; }
+:root{
+  --bk-primary:#0057B8;   /* azul Bakof (ajuste se quiser) */
+  --bk-primary-2:#0077FF; /* azul claro p/ gradiente */
+  --bk-accent:#00AEEF;    /* ciano de detalhe */
+  --bk-bg:#0B1220;        /* fundo (dark elegante) */
+  --bk-card:#0F1828;      /* card */
+  --bk-border:rgba(255,255,255,0.10);
+  --bk-text:#E9EEF6;      /* texto principal */
+  --bk-sub:#B8C2D3;       /* texto secundário */
+}
+
+html, body, [data-testid="stAppViewContainer"]{
+  background: var(--bk-bg);
+  color: var(--bk-text);
+}
+
+/* ===== Topbar ===== */
+.bk-topbar {
+  background: linear-gradient(90deg, var(--bk-primary), var(--bk-primary-2));
+  color: white;
+  padding: 14px 18px;
+  border-radius: 12px;
+  display: flex; align-items: center; gap: 14px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+  margin: 4px 2px 14px 2px;
+}
+.bk-topbar .bk-logo {
+  height: 34px; width:auto; border-radius: 6px;
+  background: rgba(255,255,255,0.15);
+  padding: 6px 10px; display:flex; align-items:center; justify-content:center;
+}
+.bk-topbar h1 {
+  font-size: 1.15rem; font-weight: 700; margin: 0;
+}
+.bk-topbar .bk-sub {
+  font-size: .85rem; opacity:.95; margin-top: 2px;
+}
+
+/* ===== Sidebar ===== */
+section[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, rgba(0,87,184,0.12), rgba(0,0,0,0));
+  border-right: 1px solid var(--bk-border);
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarContent"]{
+  color: var(--bk-text);
+}
+[data-testid="stSidebarNav"] a{ color: var(--bk-text); }
+
+/* Radio/menu */
+div[role="radiogroup"] > label {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--bk-border);
+  padding: 8px 10px; border-radius: 10px; margin-bottom: 8px;
+}
+div[role="radiogroup"] > label:hover { border-color: rgba(255,255,255,0.25); }
+
+/* ===== Cards ===== */
+.card {
+  background: var(--bk-card);
+  border: 1px solid var(--bk-border);
+  border-radius: 14px;
+  padding: 16px 16px 12px 16px;
+  margin-bottom: 14px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.18);
+}
+.card h2,.card h3,.card h4 { margin: 0 0 8px 0; font-weight: 700; }
+
+/* ===== Inputs & Selects ===== */
+[data-baseweb="select"] > div, .stTextInput > div > div, .stDateInput > div, .stNumberInput > div {
+  min-height: 44px; border-radius: 10px !important; border: 1px solid var(--bk-border);
+  background: rgba(255,255,255,0.02);
+}
+.stTextArea textarea, .stTextInput input {
+  background: transparent !important; color: var(--bk-text) !important;
+}
+
+/* ===== Botões ===== */
+.stButton > button, .stForm button[kind="primary"]{
+  height: 46px; font-size: 16px; font-weight: 700;
+  border-radius: 12px; border: 0;
+  color: white; letter-spacing: .2px;
+  background: linear-gradient(180deg, var(--bk-primary-2), var(--bk-primary));
+  box-shadow: 0 8px 16px rgba(0,119,255,0.28);
+  transition: transform .03s ease-in, filter .15s ease-out, box-shadow .2s ease;
+}
+.stButton > button:hover, .stForm button[kind="primary"]:hover{
+  filter: brightness(1.05);
+  box-shadow: 0 10px 22px rgba(0,119,255,0.34);
+}
+.stButton > button:active, .stForm button[kind="primary"]:active{ transform: translateY(1px); }
+
+/* ===== Tabelas ===== */
+div[data-testid="stDataFrame"] table{
+  border-collapse: separate; border-spacing: 0;
+  border: 1px solid var(--bk-border);
+  border-radius: 12px; overflow: hidden;
+  background: rgba(3,7,18,0.35);
+}
+div[data-testid="stDataFrame"] thead tr th{
+  background: linear-gradient(180deg, rgba(0,119,255,0.18), rgba(0,119,255,0.05));
+  color: #EAF3FF; font-weight: 700; border-bottom: 1px solid var(--bk-border);
+}
+div[data-testid="stDataFrame"] tbody tr td{
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ===== Métricas ===== */
+[data-testid="stMetricValue"]{ color: #EAF3FF; }
+[data-testid="stMetricLabel"]{ color: var(--bk-sub); }
+
+/* ===== Diversos ===== */
+.block-container{ padding-top: 12px; }
+.dataframe td, .dataframe th { border-bottom: 2px solid rgba(128,128,128,0.25) !important; }
+.stCheckbox > label{ color: var(--bk-text); }
 </style>
 """, unsafe_allow_html=True)
+
 
 # ==============================
 # Helpers de atualização instantânea
