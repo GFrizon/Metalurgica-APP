@@ -931,7 +931,7 @@ if menu == "📋 Fila de Trabalho":
         )
     grid_with_colors(table_fila, height=520)
 
-    # ======= AÇÕES (OPERADOR e ADMIN) =======
+        # ======= AÇÕES (OPERADOR e ADMIN) =======
     if u["role"] in ("OPERADOR", "ADMIN"):
         st.divider()
         st.subheader("Ações")
@@ -971,13 +971,11 @@ if menu == "📋 Fila de Trabalho":
                         nome_exec = st.session_state.get("sb_ini_exec")
                         exec_id = int(df_ociosos.loc[df_ociosos["nome"] == nome_exec, "id"].iloc[0])
 
-                        # 1) reservar executor se ainda Ocioso
                         aff1 = exec_rowcount("UPDATE colaboradores SET status='Em Execução' WHERE id=%s AND status='Ocioso'", (exec_id,))
                         if aff1 == 0:
                             st.warning(f"{nome_exec} não está mais ocioso.")
                             refresh_now("📋 Fila de Trabalho")
 
-                        # 2) mudar OS se ainda Aberta (atômico)
                         aff2 = exec_rowcount(
                             "UPDATE ordens_servico SET status='Em Execução', data_inicio=NOW(), executor_id=%s "
                             "WHERE id=%s AND status='Aberta' AND COALESCE(arquivada,0)=0",
@@ -1054,83 +1052,77 @@ if menu == "📋 Fila de Trabalho":
             st.markdown('</div>', unsafe_allow_html=True)
 
         # -------- ADICIONAR --------
-    with bottom_left:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### ➕ Adicionar colaborador")
+        with bottom_left:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.markdown("### ➕ Adicionar colaborador")
 
-        with st.form("form_add_col", clear_on_submit=False):
-            if not em_exec_ids:
-                st.selectbox("Ordens (Em execução)", ["—"], index=0, disabled=True, key="sb_add_os_disabled")
-                os_add_val = None
-            else:
-                st.selectbox("Ordens (Em execução)", em_exec_ids, index=0, key="sb_add_os")
-                os_add_val = st.session_state.get("sb_add_os")
+            with st.form("form_add_col", clear_on_submit=False):
+                if not em_exec_ids:
+                    st.selectbox("Ordens (Em execução)", ["—"], index=0, disabled=True, key="sb_add_os_disabled")
+                    os_add_val = None
+                else:
+                    st.selectbox("Ordens (Em execução)", em_exec_ids, index=0, key="sb_add_os")
+                    os_add_val = st.session_state.get("sb_add_os")
 
-            # Pode escolher qualquer colaborador que não esteja Inativo
-            df_colab_add = pd.DataFrame(
-                run_query("SELECT id, nome, status FROM colaboradores WHERE status!='Inativo' ORDER BY nome") or []
-            )
-            if df_colab_add.empty:
-                st.selectbox("Colaborador (pode estar ocioso ou em execução)", ["—"], disabled=True, key="sb_add_col_disabled")
-            else:
-                st.selectbox(
-                    "Colaborador (pode estar ocioso ou em execução)",
-                    df_colab_add["nome"].tolist(),
-                    key="sb_add_col"
+                df_colab_add = pd.DataFrame(
+                    run_query("SELECT id, nome, status FROM colaboradores WHERE status!='Inativo' ORDER BY nome") or []
                 )
+                if df_colab_add.empty:
+                    st.selectbox("Colaborador (pode estar ocioso ou em execução)", ["—"], disabled=True, key="sb_add_col_disabled")
+                else:
+                    st.selectbox(
+                        "Colaborador (pode estar ocioso ou em execução)",
+                        df_colab_add["nome"].tolist(),
+                        key="sb_add_col"
+                    )
 
-            submit_add = st.form_submit_button("Adicionar", use_container_width=True)
+                submit_add = st.form_submit_button("Adicionar", use_container_width=True)
 
-        if submit_add:
-            os_add_col = os_add_val
-            if not os_add_col:
-                st.warning("Escolha a OS.")
-            elif df_colab_add.empty:
-                st.warning("Não há colaboradores disponíveis.")
-            else:
-                try:
-                    nome_aj = st.session_state.get("sb_add_col")
-                    linha = df_colab_add.loc[df_colab_add["nome"] == nome_aj]
-                    if linha.empty:
-                        st.warning("Colaborador inválido.")
-                    else:
-                        colab_id = int(linha["id"].iloc[0])
-                        colab_status = str(linha["status"].iloc[0] or "")
+            if submit_add:
+                os_add_col = os_add_val
+                if not os_add_col:
+                    st.warning("Escolha a OS.")
+                elif df_colab_add.empty:
+                    st.warning("Não há colaboradores disponíveis.")
+                else:
+                    try:
+                        nome_aj = st.session_state.get("sb_add_col")
+                        linha = df_colab_add.loc[df_colab_add["nome"] == nome_aj]
+                        if linha.empty:
+                            st.warning("Colaborador inválido.")
+                        else:
+                            colab_id = int(linha["id"].iloc[0])
+                            colab_status = str(linha["status"].iloc[0] or "")
 
-                        # Garante que a OS ainda está em execução
-                        ok_os = run_query(
-                            "SELECT 1 FROM ordens_servico WHERE id=%s AND status='Em Execução' AND COALESCE(arquivada,0)=0 LIMIT 1",
-                            (int(os_add_col),)
-                        )
-                        if not ok_os:
-                            st.warning("A OS não está mais em execução.")
-                            refresh_now("📋 Fila de Trabalho")
-
-                        # Se estava ocioso, passa para Em Execução; se já estava, mantém
-                        if colab_status == "Ocioso":
-                            exec_rowcount(
-                                "UPDATE colaboradores SET status='Em Execução' WHERE id=%s AND status='Ocioso'",
-                                (colab_id,)
+                            ok_os = run_query(
+                                "SELECT 1 FROM ordens_servico WHERE id=%s AND status='Em Execução' AND COALESCE(arquivada,0)=0 LIMIT 1",
+                                (int(os_add_col),)
                             )
-
-                        # Insere como ajudante (índice único evita duplicar)
-                        try:
-                            run_tx([
-                                ("INSERT INTO ajudantes_os (os_id, colaborador_id) VALUES (%s, %s)", (int(os_add_col), colab_id)),
-                            ])
-                            st.success(f"{nome_aj} adicionado na OS {os_add_col}.")
-                            refresh_now("📋 Fila de Trabalho")
-                        except Exception as e:
-                            if "Duplicate" in str(e):
-                                st.info(f"{nome_aj} já é ajudante desta OS.")
+                            if not ok_os:
+                                st.warning("A OS não está mais em execução.")
                                 refresh_now("📋 Fila de Trabalho")
-                            else:
-                                st.error(f"Erro ao adicionar: {e}")
-                except Exception as e:
-                    st.error(f"Erro ao adicionar: {e}")
 
-        st.markdown("</div>", unsafe_allow_html=True)
+                            if colab_status == "Ocioso":
+                                exec_rowcount(
+                                    "UPDATE colaboradores SET status='Em Execução' WHERE id=%s AND status='Ocioso'",
+                                    (colab_id,)
+                                )
 
+                            try:
+                                run_tx([
+                                    ("INSERT INTO ajudantes_os (os_id, colaborador_id) VALUES (%s, %s)", (int(os_add_col), colab_id)),
+                                ])
+                                st.success(f"{nome_aj} adicionado na OS {os_add_col}.")
+                                refresh_now("📋 Fila de Trabalho")
+                            except Exception as e:
+                                if "Duplicate" in str(e):
+                                    st.info(f"{nome_aj} já é ajudante desta OS.")
+                                    refresh_now("📋 Fila de Trabalho")
+                                else:
+                                    st.error(f"Erro ao adicionar: {e}")
+                    except Exception as e:
+                        st.error(f"Erro ao adicionar: {e}")
+            st.markdown("</div>", unsafe_allow_html=True)
 
         # -------- REMOVER --------
         with bottom_right:
