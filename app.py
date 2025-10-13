@@ -1093,6 +1093,7 @@ if u["role"] in ("OPERADOR", "ADMIN"):
     if st.button("🔄 Atualizar fila", use_container_width=True):
         refresh_now("📋 Fila de Trabalho")
 
+
 # ---------- CONCLUÍDAS (com filtro de MÊS estável) ----------
 elif menu == "✅ Concluídas":
     st.title("✅ Ordens de serviço Concluídas — Metalúrgica Bakof Tec")
