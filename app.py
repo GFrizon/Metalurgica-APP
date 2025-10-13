@@ -944,6 +944,129 @@ if "user" not in st.session_state:
                 if st.session_state["login_attempts"] >= 5:
                     st.session_state["login_block_until"] = datetime.now() + timedelta(minutes=2)
                 st.sidebar.error("Usuário ou senha inválidos.")
+
+    # --- CONTEÚDO DA PÁGINA DE LOGIN (lado direito) ---
+    st.markdown("""
+    <style>
+    .login-hero {
+    background: linear-gradient(135deg, rgba(0,87,184,.20), rgba(0,174,239,.12));
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 14px;
+    padding: 24px;
+    box-shadow: 0 8px 22px rgba(0,0,0,.35);
+    backdrop-filter: blur(3px);
+    }
+    .login-card {
+    background: rgba(255,255,255,.05);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 12px;
+    }
+    .login-kpi {
+    text-align:center;
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.10);
+    border-radius: 12px;
+    padding: 14px 10px;
+    box-shadow: inset 0 0 8px rgba(0,0,0,.25);
+    }
+    .login-kpi h3 {
+    margin: 0;
+    font-size: 1.9rem;
+    font-weight: 800;
+    color: #00AEEF;
+    }
+    .login-kpi p {
+    margin: 0;
+    color: #E0E0E0;
+    font-size: .85rem;
+    letter-spacing: .5px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    col_main, col_side = st.columns([2.2, 1.1])
+
+    with col_main:
+        st.markdown('<div class="login-hero">', unsafe_allow_html=True)
+        st.markdown("### 👋 Bem-vindo à Fila de Trabalho — Bakof Tec")
+        st.caption("Visualize informações rápidas e acesse orientações sobre o sistema.")
+
+        # ===== KPIs por SQL direto (robusto e leve)
+        try:
+            row = run_query("""
+                SELECT
+                    SUM(CASE WHEN status='Aberta' THEN 1 ELSE 0 END)       AS abertas,
+                    SUM(CASE WHEN status='Em Execução' THEN 1 ELSE 0 END)  AS execucao,
+                    SUM(CASE WHEN status='Concluída' THEN 1 ELSE 0 END)    AS concluidas
+                FROM ordens_servico
+                WHERE COALESCE(arquivada,0)=0
+            """) or [{"abertas":0,"execucao":0,"concluidas":0}]
+            total_abertas = int(row[0]["abertas"] or 0)
+            total_exec    = int(row[0]["execucao"] or 0)
+            total_conc    = int(row[0]["concluidas"] or 0)
+        except Exception as e:
+            st.caption(f"⚠️ Não foi possível carregar os números agora ({e}).")
+            total_abertas = total_exec = total_conc = 0
+
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            st.markdown(f'<div class="login-kpi"><h3>{total_abertas}</h3><p>Abertas</p></div>', unsafe_allow_html=True)
+        with k2:
+            st.markdown(f'<div class="login-kpi"><h3>{total_exec}</h3><p>Em execução</p></div>', unsafe_allow_html=True)
+        with k3:
+            st.markdown(f'<div class="login-kpi"><h3>{total_conc}</h3><p>Concluídas</p></div>', unsafe_allow_html=True)
+
+        # ===== Guia rápido
+        st.markdown(
+            '<div class="login-card">'
+            "<b>📋 Como solicitar uma OS</b><br>"
+            "1️⃣ Faça login<br>"
+            "2️⃣ Vá até <i>📝 Solicitar OS</i><br>"
+            "3️⃣ Preencha e envie<br><br>"
+            "Acompanhe o andamento em <i>📋 Fila de Trabalho</i>."
+            "</div>",
+            unsafe_allow_html=True
+        )
+
+        # ===== Últimas 5 OS (somente leitura, opcional)
+        try:
+            ultimas = run_query("""
+                SELECT id, produto, status,
+                    DATE_FORMAT(data_abertura,'%d/%m/%Y') AS abertura
+                FROM ordens_servico
+                WHERE COALESCE(arquivada,0)=0
+                ORDER BY id DESC
+                LIMIT 5
+            """) or []
+            if ultimas:
+                st.markdown('<div class="login-card"><b>🕘 Últimas OS</b>', unsafe_allow_html=True)
+                for r in ultimas:
+                    st.markdown(f"- **#{r['id']}** · {r['produto'] or '—'} · _{r['status']}_ · {r['abertura']}")
+                st.markdown('</div>', unsafe_allow_html=True)
+        except Exception:
+            pass
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with col_side:
+        st.markdown("#### 📣 Avisos")
+        aviso = os.getenv("APP_LOGIN_NOTICE", "")
+        if aviso:
+            st.info(aviso)
+        else:
+            st.info("Sistema operando normalmente ✅")
+
+        st.markdown("#### 🆘 Suporte")
+        st.markdown(
+            '<div class="login-card">'
+            "• WhatsApp: <a href='https://wa.me/5555997609' target='_blank'>Gabriel Chimello Frizon</a><br>"
+            "• E-mail: gabriel.frizon@bakof.com.br<br>"
+            "</div>",
+            unsafe_allow_html=True
+    )
+
     st.stop()
 else:
     u = st.session_state["user"]
