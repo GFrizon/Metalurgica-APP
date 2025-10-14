@@ -1166,7 +1166,7 @@ def month_bounds_from_str(ym: str):
 # ---------- FILA ----------
 if menu == "📋 Fila de Trabalho":
     st.title("📋 Fila de Trabalho — Metalúrgica Bakof Tec")
-    st_autorefresh(interval=3000, key="sync_ping")
+    st_autorefresh(interval=30000, key="sync_ping")
 
         # ======== SINCRONIZAÇÃO INSTANTÂNEA ENTRE MÁQUINAS ========
     import time
