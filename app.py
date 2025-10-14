@@ -558,6 +558,11 @@ def auth_login(username: str, password: str):
 def auth_logout():
     st.session_state.pop("user", None)
 
+# === Quem verá tabela compacta (apenas o usuário 'metalurgica') ===
+def is_metalurgica_user() -> bool:
+    u = st.session_state.get("user") or {}
+    return str(u.get("username","")).lower() == "metalurgica"
+
 def require_roles(allowed):
     user = st.session_state.get("user")
     if not user:
@@ -832,8 +837,23 @@ def grid_with_colors(df: pd.DataFrame, height=520):
         return
     if not USE_AGGRID:
         styled = styler_for_table(df)
-        st.dataframe(styled, use_container_width=True, height=height)
+        # 🔽 esconder índice só para o usuário 'metalurgica' na Fila de Trabalho
+        hide_idx = bool(st.session_state.get("_hide_index_ft", False))
+        try:
+            if hide_idx:
+                # pandas Styler (pandas >= 1.4)
+                styled = styled.hide(axis="index")
+            st.dataframe(styled, use_container_width=True, height=height)
+        except Exception:
+            # fallback caso a versão de pandas/streamlit não suporte .hide(axis="index")
+            if hide_idx:
+                df = df.reset_index(drop=True)
+                styled = styler_for_table(df)
+                st.dataframe(styled, use_container_width=True, height=height)
+            else:
+                st.dataframe(styled, use_container_width=True, height=height)
         return
+
     from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(resizable=True, sortable=True, filter=True)
@@ -1198,6 +1218,17 @@ if menu == "📋 Fila de Trabalho":
     else:
         df_fila_nao_conc = df_fila[df_fila["status"] != "Concluída"].copy()
         table_fila = view_table(df_fila_nao_conc)
+
+        # 🔽 Para o usuário 'metalurgica': remover "!", "Encerramento" e "Atraso (d)"
+    # e esconder a coluna de índice (os números da esquerda)
+    if not table_fila.empty and is_metalurgica_user():
+        drop_cols = ["!", "Encerramento", "Atraso (d)"]
+        drop_cols = [c for c in drop_cols if c in table_fila.columns]
+        table_fila = table_fila.drop(columns=drop_cols)
+        # marcamos numa flag pra esconder o índice lá no renderer
+        st.session_state["_hide_index_ft"] = True
+    else:
+        st.session_state["_hide_index_ft"] = False
 
     # Renderização
     if table_fila.empty:
