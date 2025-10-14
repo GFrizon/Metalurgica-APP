@@ -1,3 +1,5 @@
+BKP
+
 # app.py
 import os
 os.environ["OTEL_SDK_DISABLED"] = "true"
@@ -1166,33 +1168,6 @@ def month_bounds_from_str(ym: str):
 # ---------- FILA ----------
 if menu == "📋 Fila de Trabalho":
     st.title("📋 Fila de Trabalho — Metalúrgica Bakof Tec")
-    st_autorefresh(interval=30000, key="sync_ping")
-
-        # ======== SINCRONIZAÇÃO INSTANTÂNEA ENTRE MÁQUINAS ========
-    import time
-
-    def _last_sync_ts():
-        """
-        Lê o 'sinal' de sincronização (epoch/contador) do banco.
-        Retorna 0 se não existir.
-        """
-        try:
-            row = run_query("SELECT val FROM app_sync WHERE k='fila' LIMIT 1") or []
-            return int(row[0]["val"]) if row else 0
-        except Exception:
-            return 0
-
-    try:
-        current_ts = _last_sync_ts()
-        last_seen_ts = st.session_state.get("last_sync_seen", 0)
-
-        if current_ts > last_seen_ts:
-            st.session_state["last_sync_seen"] = current_ts
-            st.toast("🔄 Atualizando dados em tempo real...", icon="🔁")
-            time.sleep(0.5)
-            refresh_now("📋 Fila de Trabalho")
-    except Exception as e:
-        st.warning(f"Erro na sincronização: {e}")
 
     # Filtros
     fcol1, fcol2, fcol3 = st.columns([1,1,2])
@@ -1333,7 +1308,6 @@ if menu == "📋 Fila de Trabalho":
                             refresh_now("📋 Fila de Trabalho")
                         else:
                             st.success(f"OS {os_iniciar} iniciada por {nome_exec}.")
-                            run_query("UPDATE app_sync SET ultima_atualizacao = NOW() WHERE id=1", commit=True)
                             refresh_now("📋 Fila de Trabalho")
 
                     except Exception as e:
@@ -1393,7 +1367,6 @@ if menu == "📋 Fila de Trabalho":
                                 run_query("UPDATE colaboradores SET status='Ocioso' WHERE id=%s", (cid,), commit=True)
 
                         st.success(f"OS {os_id} concluída.")
-                        run_query("UPDATE app_sync SET ultima_atualizacao = NOW() WHERE id=1", commit=True)
                         refresh_now("📋 Fila de Trabalho")
                     except Exception as e:
                         st.error(f"Erro ao encerrar: {e}")
@@ -1461,7 +1434,6 @@ if menu == "📋 Fila de Trabalho":
                                     ("INSERT INTO ajudantes_os (os_id, colaborador_id) VALUES (%s, %s)", (int(os_add_col), colab_id)),
                                 ])
                                 st.success(f"{nome_aj} adicionado na OS {os_add_col}.")
-                                run_query("UPDATE app_sync SET ultima_atualizacao = NOW() WHERE id=1", commit=True)
                                 refresh_now("📋 Fila de Trabalho")
                             except Exception as e:
                                 if "Duplicate" in str(e):
@@ -1525,8 +1497,8 @@ if menu == "📋 Fila de Trabalho":
                         """, (colab_id_rm,))
                         if not ainda_exec and not ainda_aj:
                             run_query("UPDATE colaboradores SET status='Ocioso' WHERE id=%s", (colab_id_rm,), commit=True)
+
                         st.success(f"{nome_rm} removido da OS {os_rm}.")
-                        run_query("UPDATE app_sync SET ultima_atualizacao = NOW() WHERE id=1", commit=True)
                         refresh_now("📋 Fila de Trabalho")
                     except Exception as e:
                         st.error(f"Erro ao remover: {e}")
@@ -1660,6 +1632,52 @@ elif menu == "✅ Concluídas":
                                 margin=dict(l=10, r=10, t=40, b=10),
                             )
                             st.plotly_chart(fig, use_container_width=True)
+                    # ======= Limpar OS (somente ADMIN) =======
+        st.divider()
+        st.subheader("🧹 Limpar Ordens de Serviço")
+
+        with st.form("form_limpar_os", clear_on_submit=False):
+            escopo = st.radio(
+                "O que limpar?",
+                ["Apenas não arquivadas", "Todas as OS (inclusive arquivadas)"],
+                index=0,
+                help="Escolha se quer limpar só as que não foram arquivadas ou absolutamente todas."
+            )
+            reset_ai = st.checkbox("Zerar numeração de OS (AUTO_INCREMENT volta para 1)", value=True)
+            st.caption("⚠️ Esta ação é irreversível. Use com cuidado.")
+            confirma = st.text_input("Digite **LIMPAR** para confirmar").strip().upper()
+            btn_limpar = st.form_submit_button("Apagar OS agora", type="primary", use_container_width=True)
+
+        if btn_limpar:
+            if confirma != "LIMPAR":
+                st.warning("Você precisa digitar **LIMPAR** para confirmar.")
+            else:
+                try:
+                    # Apaga conforme escopo
+                    if escopo == "Apenas não arquivadas":
+                        row = run_query("SELECT COUNT(*) AS c FROM ordens_servico WHERE COALESCE(arquivada,0)=0")
+                        qtd_prev = int((row or [{"c":0}])[0]["c"])
+                        aff_os = exec_rowcount(
+                            "DELETE FROM ordens_servico WHERE COALESCE(arquivada,0)=0"
+                        )
+                    else:
+                        row = run_query("SELECT COUNT(*) AS c FROM ordens_servico")
+                        qtd_prev = int((row or [{"c":0}])[0]["c"])
+                        aff_os = exec_rowcount("DELETE FROM ordens_servico")
+
+                    # Zera auto-incremento se marcado
+                    if reset_ai:
+                        run_query("ALTER TABLE ordens_servico AUTO_INCREMENT = 1", commit=True)
+
+                    # Deixa todos colaboradores Ociosos
+                    exec_rowcount("UPDATE colaboradores SET status='Ocioso' WHERE status <> 'Ocioso'")
+
+                    st.success(f"Limpeza concluída ✅ — OS removidas: {aff_os} (previstas: {qtd_prev}).")
+                    refresh_now("📋 Fila de Trabalho")
+
+                except Exception as e:
+                    st.error(f"Erro ao limpar OS: {e}")
+
 
                     df_lt = df_mes.copy()
                     df_lt["data_abertura"] = pd.to_datetime(df_lt["data_abertura"], errors="coerce")
@@ -1913,6 +1931,61 @@ elif menu == "🔧 Administração":
             margin=dict(l=10, r=10, t=40, b=10),
         )
         st.plotly_chart(fig, use_container_width=True)
+
+            # ======= Limpar OS (somente ADMIN) =======
+    st.divider()
+    st.subheader("🧹 Limpar Ordens de Serviço")
+
+    with st.form("form_limpar_os", clear_on_submit=False):
+        escopo = st.radio(
+            "O que limpar?",
+            ["Apenas não arquivadas", "Todas as OS (inclusive arquivadas)"],
+            index=0,
+            help="Escolha se quer limpar só as que não foram arquivadas ou absolutamente todas."
+        )
+        reset_ai = st.checkbox("Zerar numeração de OS (AUTO_INCREMENT volta para 1)", value=True)
+        st.caption("⚠️ Esta ação é irreversível. Use com cuidado.")
+        confirma = st.text_input("Digite **LIMPAR** para confirmar").strip().upper()
+        btn_limpar = st.form_submit_button("Apagar OS agora", type="primary", use_container_width=True)
+
+    if btn_limpar:
+        if confirma != "LIMPAR":
+            st.warning("Você precisa digitar **LIMPAR** para confirmar.")
+        else:
+            try:
+                # Apaga somente pelo escopo escolhido
+                if escopo == "Apenas não arquivadas":
+                    # Conta antes pra informar quantas serão removidas
+                    row = run_query("SELECT COUNT(*) AS c FROM ordens_servico WHERE COALESCE(arquivada,0)=0")
+                    qtd_prev = int((row or [{"c":0}])[0]["c"])
+
+                    aff_os = exec_rowcount(
+                        "DELETE FROM ordens_servico WHERE COALESCE(arquivada,0)=0"
+                    )
+                    # ajudantes_os referentes são removidos por ON DELETE CASCADE
+
+                else:
+                    row = run_query("SELECT COUNT(*) AS c FROM ordens_servico")
+                    qtd_prev = int((row or [{"c":0}])[0]["c"])
+
+                    # Apaga tudo
+                    aff_os = exec_rowcount("DELETE FROM ordens_servico")
+                    # ajudantes_os referentes são removidos por ON DELETE CASCADE
+
+                # Zera auto-incremento se marcado
+                if reset_ai:
+                    run_query("ALTER TABLE ordens_servico AUTO_INCREMENT = 1", commit=True)
+
+                # Deixa todos colaboradores como Ociosos
+                exec_rowcount("UPDATE colaboradores SET status='Ocioso' WHERE status <> 'Ocioso'")
+
+                st.success(f"Limpeza concluída ✅ — OS removidas: {aff_os} (previstas: {qtd_prev}).")
+                # Volta para a fila para o usuário ver a lista vazia
+                refresh_now("📋 Fila de Trabalho")
+
+            except Exception as e:
+                st.error(f"Erro ao limpar OS: {e}")
+
 
     # ======= Gestão de Colaboradores (DENTRO de '🔧 Administração') =======
     st.divider()
