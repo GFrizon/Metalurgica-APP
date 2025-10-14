@@ -1930,6 +1930,61 @@ elif menu == "🔧 Administração":
         )
         st.plotly_chart(fig, use_container_width=True)
 
+            # ======= Limpar OS (somente ADMIN) =======
+    st.divider()
+    st.subheader("🧹 Limpar Ordens de Serviço")
+
+    with st.form("form_limpar_os", clear_on_submit=False):
+        escopo = st.radio(
+            "O que limpar?",
+            ["Apenas não arquivadas", "Todas as OS (inclusive arquivadas)"],
+            index=0,
+            help="Escolha se quer limpar só as que não foram arquivadas ou absolutamente todas."
+        )
+        reset_ai = st.checkbox("Zerar numeração de OS (AUTO_INCREMENT volta para 1)", value=True)
+        st.caption("⚠️ Esta ação é irreversível. Use com cuidado.")
+        confirma = st.text_input("Digite **LIMPAR** para confirmar").strip().upper()
+        btn_limpar = st.form_submit_button("Apagar OS agora", type="primary", use_container_width=True)
+
+    if btn_limpar:
+        if confirma != "LIMPAR":
+            st.warning("Você precisa digitar **LIMPAR** para confirmar.")
+        else:
+            try:
+                # Apaga somente pelo escopo escolhido
+                if escopo == "Apenas não arquivadas":
+                    # Conta antes pra informar quantas serão removidas
+                    row = run_query("SELECT COUNT(*) AS c FROM ordens_servico WHERE COALESCE(arquivada,0)=0")
+                    qtd_prev = int((row or [{"c":0}])[0]["c"])
+
+                    aff_os = exec_rowcount(
+                        "DELETE FROM ordens_servico WHERE COALESCE(arquivada,0)=0"
+                    )
+                    # ajudantes_os referentes são removidos por ON DELETE CASCADE
+
+                else:
+                    row = run_query("SELECT COUNT(*) AS c FROM ordens_servico")
+                    qtd_prev = int((row or [{"c":0}])[0]["c"])
+
+                    # Apaga tudo
+                    aff_os = exec_rowcount("DELETE FROM ordens_servico")
+                    # ajudantes_os referentes são removidos por ON DELETE CASCADE
+
+                # Zera auto-incremento se marcado
+                if reset_ai:
+                    run_query("ALTER TABLE ordens_servico AUTO_INCREMENT = 1", commit=True)
+
+                # Deixa todos colaboradores como Ociosos
+                exec_rowcount("UPDATE colaboradores SET status='Ocioso' WHERE status <> 'Ocioso'")
+
+                st.success(f"Limpeza concluída ✅ — OS removidas: {aff_os} (previstas: {qtd_prev}).")
+                # Volta para a fila para o usuário ver a lista vazia
+                refresh_now("📋 Fila de Trabalho")
+
+            except Exception as e:
+                st.error(f"Erro ao limpar OS: {e}")
+
+
     # ======= Gestão de Colaboradores (DENTRO de '🔧 Administração') =======
     st.divider()
     st.subheader("👥 Gestão de Colaboradores")
