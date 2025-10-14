@@ -836,23 +836,24 @@ def grid_with_colors(df: pd.DataFrame, height=520):
         st.dataframe(df, use_container_width=True, height=height)
         return
     if not USE_AGGRID:
-        styled = styler_for_table(df)
-        # 🔽 esconder índice só para o usuário 'metalurgica' na Fila de Trabalho
+    # ⬅️ se precisar esconder o índice (caso do usuário 'metalurgica'),
+    # zera o índice ANTES de estilizar e avisa o st.dataframe para ocultar.
         hide_idx = bool(st.session_state.get("_hide_index_ft", False))
-        try:
-            if hide_idx:
-                # pandas Styler (pandas >= 1.4)
-                styled = styled.hide(axis="index")
-            st.dataframe(styled, use_container_width=True, height=height)
-        except Exception:
-            # fallback caso a versão de pandas/streamlit não suporte .hide(axis="index")
-            if hide_idx:
-                df = df.reset_index(drop=True)
-                styled = styler_for_table(df)
-                st.dataframe(styled, use_container_width=True, height=height)
-            else:
-                st.dataframe(styled, use_container_width=True, height=height)
-        return
+        df_to_show = df.copy()
+    if hide_idx:
+        df_to_show = df_to_show.reset_index(drop=True)
+
+    styled = styler_for_table(df_to_show)
+
+    try:
+        # Streamlit novo aceita hide_index=True direto:
+        st.dataframe(styled, use_container_width=True, height=height, hide_index=hide_idx)
+    except Exception:
+        # fallback (versões antigas): já resetamos o índice, então só renderiza
+        st.dataframe(styled, use_container_width=True, height=height)
+
+    return
+
 
     from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
     gb = GridOptionsBuilder.from_dataframe(df)
