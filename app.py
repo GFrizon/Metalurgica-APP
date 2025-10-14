@@ -1166,16 +1166,21 @@ def month_bounds_from_str(ym: str):
 # ---------- FILA ----------
 if menu == "📋 Fila de Trabalho":
     st.title("📋 Fila de Trabalho — Metalúrgica Bakof Tec")
+    st_autorefresh(interval=3000, key="sync_ping")
 
         # ======== SINCRONIZAÇÃO INSTANTÂNEA ENTRE MÁQUINAS ========
     import time
 
-    @st.cache_data(ttl=2, show_spinner=False)
     def _last_sync_ts():
-        row = run_query(
-            "SELECT UNIX_TIMESTAMP(ultima_atualizacao) AS ts FROM app_sync WHERE id=1"
-        ) or [{"ts": 0}]
-        return int(row[0]["ts"])
+        """
+        Lê o 'sinal' de sincronização (epoch/contador) do banco.
+        Retorna 0 se não existir.
+        """
+        try:
+            row = run_query("SELECT val FROM app_sync WHERE k='fila' LIMIT 1") or []
+            return int(row[0]["val"]) if row else 0
+        except Exception:
+            return 0
 
     try:
         current_ts = _last_sync_ts()
