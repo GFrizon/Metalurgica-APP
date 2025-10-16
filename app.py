@@ -1443,33 +1443,35 @@ if menu == "📋 Fila de Trabalho":
                         st.error(f"Erro ao adicionar: {e}")
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # -------- REMOVER --------
+                # -------- REMOVER --------
     with bottom_right:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown("### 🗑️ Remover colaborador")
 
         with st.form("form_rm_col", clear_on_submit=False):
-            # 1) Escolha da OS (em execução)
+            # 1) OS em execução
             if not em_exec_ids:
                 st.selectbox("OS (Em execução)", ["—"], index=0, disabled=True, key="sb_rm_os_disabled")
                 os_rm_val = None
             else:
                 os_rm_val = st.selectbox("OS (Em execução)", em_exec_ids, index=0, key="sb_rm_os")
 
-            # 2) Se a OS mudou, limpamos seleções antigas de ajudante (conserta "estado preso")
+            # 2) Se a OS mudou, zerar a seleção do ajudante (evita estado antigo)
             prev_os = st.session_state.get("_rm_last_os")
             if prev_os != os_rm_val:
                 st.session_state["_rm_last_os"] = os_rm_val
-                # apaga qualquer seleção antiga de ajudante
-                for k in list(st.session_state.keys()):
-                    if k.startswith("sb_rm_col_"):
-                        st.session_state.pop(k, None)
+                sel_key_prev = f"sb_rm_col_{prev_os}" if prev_os else None
+                if sel_key_prev and sel_key_prev in st.session_state:
+                    st.session_state.pop(sel_key_prev, None)
+                sel_key_cur = f"sb_rm_col_{os_rm_val}" if os_rm_val else None
+                if sel_key_cur and sel_key_cur in st.session_state:
+                    st.session_state.pop(sel_key_cur, None)
 
-            # 3) Lista de ajudantes da OS selecionada
+            # 3) Lista atual de ajudantes da OS escolhida
             if not os_rm_val:
                 st.selectbox("Ajudante", ["—"], disabled=True, key="sb_rm_col_disabled")
                 aj_all = pd.DataFrame()
-                aj_id = None
+                selected_aj = None
             else:
                 aj_all = pd.DataFrame(run_query("""
                     SELECT a.id AS aj_id, a.os_id, c.nome, a.colaborador_id
@@ -1480,34 +1482,39 @@ if menu == "📋 Fila de Trabalho":
                 """, (int(os_rm_val),)) or [])
 
                 if aj_all.empty:
-                    st.selectbox("Ajudante", ["—"], disabled=True, key=f"sb_rm_col_disabled")
-                    aj_id = None
+                    st.selectbox("Ajudante", ["—"], disabled=True, key="sb_rm_col_disabled")
+                    selected_aj = None
                 else:
-                    # Operador escolhe pelo NOME (valor exibido); internamente buscamos o aj_id correspondente
-                    nomes = aj_all["nome"].tolist()
-                    nome_escolhido = st.selectbox("Ajudante", nomes, key=f"sb_rm_col_{os_rm_val}")
-                    aj_id = int(aj_all.loc[aj_all["nome"] == nome_escolhido, "aj_id"].iloc[0]) if nome_escolhido else None
+                    # ✅ Opções como dicionários; operador vê só o nome
+                    options = aj_all.to_dict("records")
+                    sel_key = f"sb_rm_col_{os_rm_val}"
+                    selected_aj = st.selectbox(
+                        "Ajudante",
+                        options=options,
+                        format_func=lambda r: r["nome"] if isinstance(r, dict) else str(r),
+                        key=sel_key,
+                    )
 
-            # 4) Botão de submit SEMPRE presente (evita "Missing Submit Button")
+            # 4) Botão de submit sempre presente
             submit_rm = st.form_submit_button("Remover", use_container_width=True)
 
-        # 5) Execução da remoção
+        # 5) Execução
         if submit_rm:
             if not os_rm_val:
                 st.warning("Escolha a OS.")
-            elif aj_all.empty or aj_id is None:
+            elif aj_all.empty or not selected_aj:
                 st.warning("Não há ajudantes para remover.")
             else:
                 try:
-                    # Remove o registro de ajudante (usa aj_id, 1-para-1)
+                    aj_id = int(selected_aj["aj_id"])
+                    colab_id_rm = int(selected_aj["colaborador_id"])
+
                     aff = exec_rowcount("DELETE FROM ajudantes_os WHERE id=%s", (aj_id,))
                     if aff == 0:
                         st.info("Esse ajudante já havia sido removido.")
                         refresh_now("📋 Fila de Trabalho")
 
-                    # Descobre o colaborador removido para, se necessário, voltar a 'Ocioso'
-                    colab_id_rm = int(aj_all.loc[aj_all["aj_id"] == aj_id, "colaborador_id"].iloc[0])
-
+                    # Se não participar de mais nenhuma OS em execução, volta para Ocioso
                     ainda_exec = run_query(
                         "SELECT 1 FROM ordens_servico WHERE executor_id=%s AND status='Em Execução' LIMIT 1",
                         (colab_id_rm,)
@@ -1515,7 +1522,7 @@ if menu == "📋 Fila de Trabalho":
                     ainda_aj = run_query("""
                         SELECT 1
                         FROM ajudantes_os a
-                        JOIN ordens_servico o ON o.id = a.os_id
+                        JOIN ordens_servico o ON o.id=a.os_id
                         WHERE a.colaborador_id=%s AND o.status='Em Execução'
                         LIMIT 1
                     """, (colab_id_rm,))
@@ -1530,7 +1537,6 @@ if menu == "📋 Fila de Trabalho":
                     st.error(f"Erro ao remover: {e}")
 
         st.markdown('</div>', unsafe_allow_html=True)
-
 
         st.markdown("—")
         if st.button("🔄 Atualizar fila", use_container_width=True):
