@@ -1,3 +1,4 @@
+
 # app.py
 import os
 os.environ["OTEL_SDK_DISABLED"] = "true"
@@ -1443,49 +1444,51 @@ if menu == "📋 Fila de Trabalho":
                         st.error(f"Erro ao adicionar: {e}")
             st.markdown("</div>", unsafe_allow_html=True)
 
-                # -------- REMOVER --------
+                    # -------- REMOVER (corrigido) --------
     with bottom_right:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown("### 🗑️ Remover colaborador")
 
-        with st.form("form_rm_col", clear_on_submit=False):
-            # 1) OS em execução
-            if not em_exec_ids:
-                st.selectbox("OS (Em execução)", ["—"], index=0, disabled=True, key="sb_rm_os_disabled")
-                os_rm_val = None
-            else:
-                os_rm_val = st.selectbox("OS (Em execução)", em_exec_ids, index=0, key="sb_rm_os")
+        # 1) Seleção da OS — FORA do form (para disparar rerun ao mudar)
+        if not em_exec_ids:
+            st.selectbox("OS (Em execução)", ["—"], index=0, disabled=True, key="sb_rm_os_disabled")
+            os_rm_val = None
+        else:
+            os_rm_val = st.selectbox("OS (Em execução)", em_exec_ids, index=0, key="sb_rm_os")
 
-            # 2) Se a OS mudou, zerar a seleção do ajudante (evita estado antigo)
-            prev_os = st.session_state.get("_rm_last_os")
-            if prev_os != os_rm_val:
-                st.session_state["_rm_last_os"] = os_rm_val
-                sel_key_prev = f"sb_rm_col_{prev_os}" if prev_os else None
-                if sel_key_prev and sel_key_prev in st.session_state:
-                    st.session_state.pop(sel_key_prev, None)
-                sel_key_cur = f"sb_rm_col_{os_rm_val}" if os_rm_val else None
-                if sel_key_cur and sel_key_cur in st.session_state:
-                    st.session_state.pop(sel_key_cur, None)
+        # Zera seleção do ajudante quando a OS muda
+        prev_os = st.session_state.get("_rm_last_os")
+        if prev_os != os_rm_val:
+            st.session_state["_rm_last_os"] = os_rm_val
+            # limpa qualquer seleção antiga ligada à OS anterior
+            if prev_os:
+                st.session_state.pop(f"sb_rm_col_{prev_os}", None)
+            # também limpa a seleção atual (garantia)
+            if os_rm_val:
+                st.session_state.pop(f"sb_rm_col_{os_rm_val}", None)
+            st.rerun()
 
-            # 3) Lista atual de ajudantes da OS escolhida
-            if not os_rm_val:
-                st.selectbox("Ajudante", ["—"], disabled=True, key="sb_rm_col_disabled")
-                aj_all = pd.DataFrame()
-                selected_aj = None
-            else:
-                aj_all = pd.DataFrame(run_query("""
-                    SELECT a.id AS aj_id, a.os_id, c.nome, a.colaborador_id
-                    FROM ajudantes_os a
-                    JOIN colaboradores c ON c.id = a.colaborador_id
-                    WHERE a.os_id=%s
-                    ORDER BY c.nome
-                """, (int(os_rm_val),)) or [])
+        # 2) Busca ajudantes da OS escolhida (já com o valor atualizado)
+        if not os_rm_val:
+            aj_all = pd.DataFrame()
+            st.selectbox("Ajudante", ["—"], disabled=True, key="sb_rm_col_disabled")
+            selected_aj = None
+        else:
+            aj_all = pd.DataFrame(run_query("""
+                SELECT a.id AS aj_id, a.os_id, c.nome, a.colaborador_id
+                FROM ajudantes_os a
+                JOIN colaboradores c ON c.id = a.colaborador_id
+                WHERE a.os_id=%s
+                GROUP BY a.id, a.os_id, c.nome, a.colaborador_id   -- evita repetição visual
+                ORDER BY c.nome
+            """, (int(os_rm_val),)) or [])
 
+            # 3) Form apenas com o select dependente + botão
+            with st.form("form_rm_col", clear_on_submit=False):
                 if aj_all.empty:
                     st.selectbox("Ajudante", ["—"], disabled=True, key="sb_rm_col_disabled")
                     selected_aj = None
                 else:
-                    # ✅ Opções como dicionários; operador vê só o nome
                     options = aj_all.to_dict("records")
                     sel_key = f"sb_rm_col_{os_rm_val}"
                     selected_aj = st.selectbox(
@@ -1495,11 +1498,10 @@ if menu == "📋 Fila de Trabalho":
                         key=sel_key,
                     )
 
-            # 4) Botão de submit sempre presente
-            submit_rm = st.form_submit_button("Remover", use_container_width=True)
+                submit_rm = st.form_submit_button("Remover", use_container_width=True)
 
-        # 5) Execução
-        if submit_rm:
+        # 4) Execução
+        if 'submit_rm' in locals() and submit_rm:
             if not os_rm_val:
                 st.warning("Escolha a OS.")
             elif aj_all.empty or not selected_aj:
@@ -1514,7 +1516,7 @@ if menu == "📋 Fila de Trabalho":
                         st.info("Esse ajudante já havia sido removido.")
                         refresh_now("📋 Fila de Trabalho")
 
-                    # Se não participar de mais nenhuma OS em execução, volta para Ocioso
+                    # Se não participa de outra OS em execução, voltar para Ocioso
                     ainda_exec = run_query(
                         "SELECT 1 FROM ordens_servico WHERE executor_id=%s AND status='Em Execução' LIMIT 1",
                         (colab_id_rm,)
@@ -1537,6 +1539,7 @@ if menu == "📋 Fila de Trabalho":
                     st.error(f"Erro ao remover: {e}")
 
         st.markdown('</div>', unsafe_allow_html=True)
+
 
         st.markdown("—")
         if st.button("🔄 Atualizar fila", use_container_width=True):
