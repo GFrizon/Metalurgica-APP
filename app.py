@@ -1,11 +1,10 @@
-
-# app.py
+# ==============================
+# Parte 1 — Config, Imports, Conexão, DB Helpers e Autenticação
+# ==============================
 import os
 os.environ["OTEL_SDK_DISABLED"] = "true"
 
-# ==============================
-# Imports
-# ==============================
+# ---------- Imports ----------
 import streamlit as st
 import mysql.connector
 from mysql.connector.pooling import MySQLConnectionPool
@@ -47,24 +46,20 @@ if USE_AGGRID:
     except Exception:
         USE_AGGRID = False
 
-# ==============================
-# Config
-# ==============================
+# ---------- Config UI básica ----------
 st.set_page_config(page_title="Fila de Trabalho", layout="wide", page_icon="logo_bakof.png")
 
-# Preferir st.secrets, com fallback ao .env/variáveis
+# ---------- Loader de configs (ENV > secrets.toml > default) ----------
 def _get(key, default=None):
     """
-    1) ENV var (RECOMENDADO no Render/Heroku/etc)
+    1) ENV var (RECOMENDADO no Render/AlwaysData/etc)
     2) .streamlit/secrets.toml local (se existir)
     3) default
     """
-    # 1) ENV var
     env_key = key.replace(".", "_").upper()
     if env_key in os.environ:
         return os.getenv(env_key, default)
 
-    # 2) secrets.toml local (opcional)
     try:
         secrets_path = Path.cwd() / ".streamlit" / "secrets.toml"
         if secrets_path.exists():
@@ -77,9 +72,9 @@ def _get(key, default=None):
     except Exception:
         pass
 
-    # 3) fallback
     return default
 
+# ---------- Parâmetros de ambiente ----------
 DB_CFG = {
     "host": _get("db.host", "localhost"),
     "user": _get("db.user", "root"),
@@ -92,154 +87,18 @@ SEED_ADMIN_PASS = _get("seed.admin_pass", "Adm1nFort3!")  # troque em produção
 REQUIRE_BCRYPT = str(_get("auth.require_bcrypt", "true")).lower() == "true"
 INIT_SCHEMA = str(_get("db.init_schema", "true")).lower() == "true"  # em prod: "false"
 
-# ======= Ajustes de performance (intervalos) =======
-# refresh padrão de 60s (pode reduzir via env UI_REFRESH_MS=5000)
-REFRESH_FILA_MS = int(str(_get("ui.refresh_ms", "60000")))
-REFRESH_ADMIN_MS = int(str(_get("ui.refresh_ms_admin", "60000")))
+# Ajustes de performance (intervalos)
+REFRESH_FILA_MS = int(str(_get("ui.refresh_ms", "60000")))         # default 60s
+REFRESH_ADMIN_MS = int(str(_get("ui.refresh_ms_admin", "60000")))  # default 60s
 
 if REQUIRE_BCRYPT and not _BCRYPT_OK:
     raise RuntimeError("bcrypt é obrigatório (defina auth.require_bcrypt=false apenas em dev).")
-
-# ======= TEMA BAKOF (visual) =======
-st.markdown("""
-<style>
-:root{
-  --bk-primary:#0057B8;   /* azul Bakof (ajuste se quiser) */
-  --bk-primary-2:#0077FF; /* azul claro p/ gradiente */
-  --bk-accent:#00AEEF;    /* ciano de detalhe */
-  --bk-bg:#0B1220;        /* fundo (dark elegante) */
-  --bk-card:#0F1828;      /* card */
-  --bk-border:rgba(255,255,255,0.10);
-  --bk-text:#E9EEF6;      /* texto principal */
-  --bk-sub:#B8C2D3;       /* texto secundário */
-}
-
-html, body, [data-testid="stAppViewContainer"]{
-  background: var(--bk-bg);
-  color: var(--bk-text);
-}
-
-/* ===== Topbar ===== */
-.bk-topbar {
-  background: linear-gradient(90deg, var(--bk-primary), var(--bk-primary-2));
-  color: white;
-  padding: 14px 18px;
-  border-radius: 12px;
-  display: flex; align-items: center; gap: 14px;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.25);
-  margin: 4px 2px 14px 2px;
-}
-.bk-topbar .bk-logo {
-  height: 34px; width:auto; border-radius: 6px;
-  background: rgba(255,255,255,0.15);
-  padding: 6px 10px; display:flex; align-items:center; justify-content:center;
-}
-.bk-topbar h1 {
-  font-size: 1.15rem; font-weight: 700; margin: 0;
-}
-.bk-topbar .bk-sub {
-  font-size: .85rem; opacity:.95; margin-top: 2px;
-}
-
-/* ===== Sidebar ===== */
-section[data-testid="stSidebar"] {
-  background: linear-gradient(180deg, rgba(0,87,184,0.12), rgba(0,0,0,0));
-  border-right: 1px solid var(--bk-border);
-}
-section[data-testid="stSidebar"] [data-testid="stSidebarContent"]{
-  color: var(--bk-text);
-}
-[data-testid="stSidebarNav"] a{ color: var(--bk-text); }
-
-/* Radio/menu */
-div[role="radiogroup"] > label {
-  background: rgba(255,255,255,0.03);
-  border: 1px solid var(--bk-border);
-  padding: 8px 10px; border-radius: 10px; margin-bottom: 8px;
-}
-div[role="radiogroup"] > label:hover { border-color: rgba(255,255,255,0.25); }
-
-/* ===== Cards ===== */
-.card {
-  background: var(--bk-card);
-  border: 1px solid var(--bk-border);
-  border-radius: 14px;
-  padding: 16px 16px 12px 16px;
-  margin-bottom: 14px;
-  box-shadow: 0 6px 16px rgba(0,0,0,0.18);
-}
-.card h2,.card h3,.card h4 { margin: 0 0 8px 0; font-weight: 700; }
-
-/* ===== Inputs & Selects ===== */
-[data-baseweb="select"] > div, .stTextInput > div > div, .stDateInput > div, .stNumberInput > div {
-  min-height: 44px; border-radius: 10px !important; border: 1px solid var(--bk-border);
-  background: rgba(255,255,255,0.02);
-}
-.stTextArea textarea, .stTextInput input {
-  background: transparent !important; color: var(--bk-text) !important;
-}
-
-/* ===== Botões ===== */
-.stButton > button, .stForm button[kind="primary"]{
-  height: 46px; font-size: 16px; font-weight: 700;
-  border-radius: 12px; border: 0;
-  color: white; letter-spacing: .2px;
-  background: linear-gradient(180deg, var(--bk-primary-2), var(--bk-primary));
-  box-shadow: 0 8px 16px rgba(0,119,255,0.28);
-  transition: transform .03s ease-in, filter .15s ease-out, box-shadow .2s ease;
-}
-.stButton > button:hover, .stForm button[kind="primary"]:hover{
-  filter: brightness(1.05);
-  box-shadow: 0 10px 22px rgba(0,119,255,0.34);
-}
-.stButton > button:active, .stForm button[kind="primary"]:active{ transform: translateY(1px); }
-
-/* ===== Tabelas ===== */
-div[data-testid="stDataFrame"] table{
-  border-collapse: separate; border-spacing: 0;
-  border: 1px solid var(--bk-border);
-  border-radius: 12px; overflow: hidden;
-  background: rgba(3,7,18,0.35);
-}
-div[data-testid="stDataFrame"] thead tr th{
-  background: linear-gradient(180deg, rgba(0,119,255,0.18), rgba(0,119,255,0.05));
-  color: #EAF3FF; font-weight: 700; border-bottom: 1px solid var(--bk-border);
-}
-div[data-testid="stDataFrame"] tbody tr td{
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-}
-
-/* ===== Métricas ===== */
-[data-testid="stMetricValue"]{ color: #EAF3FF; }
-[data-testid="stMetricLabel"]{ color: var(--bk-sub); }
-
-/* ===== Diversos ===== */
-.block-container{ padding-top: 12px; }
-.dataframe td, .dataframe th { border-bottom: 2px solid rgba(128,128,128,0.25) !important; }
-.stCheckbox > label{ color: var(--bk-text); }
-</style>
-""", unsafe_allow_html=True)
-
-
-# ==============================
-# Helpers de atualização instantânea
-# ==============================
-def refresh_now(nav_to: str | None = None):
-    """Limpa caches (de dados) e dispara rerun, opcionalmente navegando para outra página."""
-    try:
-        st.cache_data.clear()
-    except Exception:
-        pass
-    if nav_to:
-        st.session_state["_nav_to"] = nav_to
-    st.rerun()
 
 # ==============================
 # Conexão MySQL: Pool + helpers
 # ==============================
 @st.cache_resource(show_spinner=False)
 def get_pool():
-    # conexão mais resiliente e sem travar em rede lenta
     return MySQLConnectionPool(
         pool_name="app_pool",
         pool_size=8,
@@ -249,10 +108,9 @@ def get_pool():
         database=DB_CFG["database"],
         autocommit=False,
         pool_reset_session=True,
-        connection_timeout=6,  # evita “pendurar”
+        connection_timeout=6,
     )
 
-# --- timezone com fallback (corrige erro 1298 em instâncias sem tz tables) ---
 def _set_session_tz(cur):
     try:
         cur.execute("SET time_zone='America/Sao_Paulo'")
@@ -301,7 +159,6 @@ def run_tx(steps):
         try: conn.close()
         except: pass
 
-# helper que devolve rowcount (para operações atômicas)
 def exec_rowcount(sql, params=None):
     pool = get_pool()
     conn = pool.get_connection()
@@ -321,7 +178,6 @@ def exec_rowcount(sql, params=None):
         try: conn.close()
         except: pass
 
-# data “oficial” do DB (cache por request)
 def get_db_today_cached():
     if "_db_today" not in st.session_state:
         row = run_query("SELECT CURRENT_DATE() AS d") or [{"d": datetime.now().date()}]
@@ -329,7 +185,7 @@ def get_db_today_cached():
     return st.session_state["_db_today"]
 
 # ==============================
-# Auth & Schema
+# Autenticação & Usuários
 # ==============================
 ROLES = {
     "ADMIN": "Administrador",
@@ -337,7 +193,6 @@ ROLES = {
     "SOLICITANTE": "Solicitante",
 }
 
-# --- Política de senha forte ---
 def validar_senha_forte(pwd: str) -> bool:
     return bool(re.match(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$', pwd or ""))
 
@@ -386,7 +241,42 @@ def set_user_password(user_id: int, new_pwd: str):
             commit=True
         )
 
+def auth_login(username: str, password: str):
+    row = run_query("SELECT * FROM usuarios WHERE username=%s AND ativo=1", (username,))
+    if not row:
+        return None
+    u = row[0]
+    if verify_password(password, u["senha_hash"]):
+        if _is_probably_sha(u["senha_hash"]) and _BCRYPT_OK:
+            try:
+                set_user_password(u["id"], password)  # migração SHA -> bcrypt
+            except Exception:
+                pass
+        return {"id": u["id"], "nome": u["nome"], "username": u["username"], "role": u["role"]}
+    return None
+
+def auth_logout():
+    st.session_state.pop("user", None)
+
+def is_metalurgica_user() -> bool:
+    u = st.session_state.get("user") or {}
+    return str(u.get("username","")).lower() == "metalurgica"
+
+def require_roles(allowed):
+    user = st.session_state.get("user")
+    if not user:
+        st.warning("Faça login para acessar esta área.")
+        return False
+    if user["role"] not in allowed:
+        st.error("Permissão negada.")
+        return False
+    return True
+
+# ==============================
+# Schema & Migrations leves
+# ==============================
 def ensure_schema():
+    # usuários
     run_query("""
         CREATE TABLE IF NOT EXISTS usuarios (
           id INT AUTO_INCREMENT PRIMARY KEY,
@@ -408,6 +298,7 @@ def ensure_schema():
             VALUES (%s, %s, %s, 'ADMIN')
         """, ("Administrador", SEED_ADMIN_USER, pwd_hash), commit=True)
 
+    # colaboradores
     run_query("""
         CREATE TABLE IF NOT EXISTS colaboradores (
           id INT AUTO_INCREMENT PRIMARY KEY,
@@ -416,6 +307,7 @@ def ensure_schema():
         )
     """, commit=True)
 
+    # ordens_servico
     run_query("""
         CREATE TABLE IF NOT EXISTS ordens_servico (
           id INT AUTO_INCREMENT PRIMARY KEY,
@@ -440,6 +332,7 @@ def ensure_schema():
         )
     """, commit=True)
 
+    # ajudantes_os
     run_query("""
         CREATE TABLE IF NOT EXISTS ajudantes_os (
           id INT AUTO_INCREMENT PRIMARY KEY,
@@ -454,6 +347,7 @@ def ensure_schema():
     except Exception:
         pass
 
+    # solicitacoes_os
     run_query("""
         CREATE TABLE IF NOT EXISTS solicitacoes_os (
           id INT AUTO_INCREMENT PRIMARY KEY,
@@ -472,6 +366,7 @@ def ensure_schema():
         )
     """, commit=True)
 
+    # índices úteis
     for ddl in [
         "CREATE INDEX idx_os_status ON ordens_servico(status)",
         "CREATE INDEX idx_os_resp ON ordens_servico(responsavel_id)",
@@ -498,7 +393,6 @@ def ensure_column(table: str, column: str, ddl_add: str):
     if not exists:
         run_query(f"ALTER TABLE {table} {ddl_add}", (), commit=True)
 
-# --- garantir DATETIME (evita HH:MM = 00:00) ---
 def ensure_datetime_column(table: str, column: str):
     try:
         row = run_query(
@@ -516,7 +410,7 @@ def ensure_datetime_column(table: str, column: str):
     except Exception:
         pass
 
-# garantir colunas adicionadas em versões antigas
+# Garantir colunas que podem não existir em bases antigas
 try:
     ensure_column("usuarios", "senha_trocada_em", "ADD COLUMN senha_trocada_em DATETIME NULL")
 except Exception:
@@ -532,54 +426,125 @@ for _tbl,_col,_ddl in [
     except Exception:
         pass
 
-# garantir tipo correto
 try:
     ensure_datetime_column("ordens_servico", "data_inicio")
     ensure_datetime_column("ordens_servico", "data_fim")
 except Exception:
     pass
 
+# Criar/atualizar schema em dev (desligue em prod)
 if INIT_SCHEMA:
     ensure_schema()
-
-def auth_login(username: str, password: str):
-    row = run_query("SELECT * FROM usuarios WHERE username=%s AND ativo=1", (username,))
-    if not row:
-        return None
-    u = row[0]
-    if verify_password(password, u["senha_hash"]):
-        if _is_probably_sha(u["senha_hash"]) and _BCRYPT_OK:
-            try:
-                set_user_password(u["id"], password)
-            except Exception:
-                pass
-        return {"id": u["id"], "nome": u["nome"], "username": u["username"], "role": u["role"]}
-    return None
-
-def auth_logout():
-    st.session_state.pop("user", None)
-
-# === Quem verá tabela compacta (apenas o usuário 'metalurgica') ===
-def is_metalurgica_user() -> bool:
-    u = st.session_state.get("user") or {}
-    return str(u.get("username","")).lower() == "metalurgica"
-
-def require_roles(allowed):
-    user = st.session_state.get("user")
-    if not user:
-        st.warning("Faça login para acessar esta área.")
-        return False
-    if user["role"] not in allowed:
-        st.error("Permissão negada.")
-        return False
-    return True
-
 # ==============================
-# Funções de dados/visão
+# Parte 2 — Tema Bakof + Helpers de Visualização, Tabelas e Caches
 # ==============================
+
+# ---------- Tema (CSS) ----------
+st.markdown("""
+<style>
+:root{
+  --bk-primary:#0057B8;
+  --bk-primary-2:#0077FF;
+  --bk-accent:#00AEEF;
+  --bk-bg:#0B1220;
+  --bk-card:#0F1828;
+  --bk-border:rgba(255,255,255,0.10);
+  --bk-text:#E9EEF6;
+  --bk-sub:#B8C2D3;
+}
+html, body, [data-testid="stAppViewContainer"]{
+  background: var(--bk-bg);
+  color: var(--bk-text);
+}
+/* Topbar */
+.bk-topbar {
+  background: linear-gradient(90deg, var(--bk-primary), var(--bk-primary-2));
+  color: white; padding: 14px 18px; border-radius: 12px;
+  display: flex; align-items: center; gap: 14px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+  margin: 4px 2px 14px 2px;
+}
+.bk-topbar .bk-logo { height: 34px; border-radius: 6px; background: rgba(255,255,255,0.15);
+  padding: 6px 10px; display:flex; align-items:center; justify-content:center; }
+.bk-topbar h1 { font-size: 1.15rem; font-weight: 700; margin: 0; }
+.bk-topbar .bk-sub { font-size: .85rem; opacity:.95; margin-top: 2px; }
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, rgba(0,87,184,0.12), rgba(0,0,0,0));
+  border-right: 1px solid var(--bk-border);
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarContent"]{ color: var(--bk-text); }
+[data-testid="stSidebarNav"] a{ color: var(--bk-text); }
+
+/* Radio/menu */
+div[role="radiogroup"] > label {
+  background: rgba(255,255,255,0.03); border: 1px solid var(--bk-border);
+  padding: 8px 10px; border-radius: 10px; margin-bottom: 8px;
+}
+div[role="radiogroup"] > label:hover { border-color: rgba(255,255,255,0.25); }
+
+/* Cards */
+.card {
+  background: var(--bk-card); border: 1px solid var(--bk-border); border-radius: 14px;
+  padding: 16px 16px 12px 16px; margin-bottom: 14px; box-shadow: 0 6px 16px rgba(0,0,0,0.18);
+}
+.card h2,.card h3,.card h4 { margin: 0 0 8px 0; font-weight: 700; }
+
+/* Inputs */
+[data-baseweb="select"] > div, .stTextInput > div > div, .stDateInput > div, .stNumberInput > div {
+  min-height: 44px; border-radius: 10px !important; border: 1px solid var(--bk-border);
+  background: rgba(255,255,255,0.02);
+}
+.stTextArea textarea, .stTextInput input { background: transparent !important; color: var(--bk-text) !important; }
+
+/* Botões */
+.stButton > button, .stForm button[kind="primary"]{
+  height: 46px; font-size: 16px; font-weight: 700; border-radius: 12px; border: 0; color: white;
+  background: linear-gradient(180deg, var(--bk-primary-2), var(--bk-primary));
+  box-shadow: 0 8px 16px rgba(0,119,255,0.28);
+  transition: transform .03s ease-in, filter .15s ease-out, box-shadow .2s ease;
+}
+.stButton > button:hover, .stForm button[kind="primary"]:hover{ filter: brightness(1.05); box-shadow: 0 10px 22px rgba(0,119,255,0.34); }
+.stButton > button:active, .stForm button[kind="primary"]:active{ transform: translateY(1px); }
+
+/* DataFrame */
+div[data-testid="stDataFrame"] table{
+  border-collapse: separate; border-spacing: 0; border: 1px solid var(--bk-border);
+  border-radius: 12px; overflow: hidden; background: rgba(3,7,18,0.35);
+}
+div[data-testid="stDataFrame"] thead tr th{
+  background: linear-gradient(180deg, rgba(0,119,255,0.18), rgba(0,119,255,0.05));
+  color: #EAF3FF; font-weight: 700; border-bottom: 1px solid var(--bk-border);
+}
+div[data-testid="stDataFrame"] tbody tr td{ border-bottom: 1px solid rgba(255,255,255,0.06); }
+
+/* Métricas */
+[data-testid="stMetricValue"]{ color: #EAF3FF; }
+[data-testid="stMetricLabel"]{ color: var(--bk-sub); }
+
+/* Diversos */
+.block-container{ padding-top: 12px; }
+.dataframe td, .dataframe th { border-bottom: 2px solid rgba(128,128,128,0.25) !important; }
+.stCheckbox > label{ color: var(--bk-text); }
+</style>
+""", unsafe_allow_html=True)
+
+# ---------- Refresh util ----------
+def refresh_now(nav_to: str | None = None):
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    if nav_to:
+        st.session_state["_nav_to"] = nav_to
+    st.rerun()
+
+# ---------- Helpers de status ----------
 def status_badge(status: str, previsao, prioridade: str = "Normal") -> str:
     urgente = str(prioridade).strip().lower() == "urgente"
     status = (status or "").strip()
+
     if status == "Concluída":
         return "🟩 Concluída"
 
@@ -603,6 +568,7 @@ def status_badge(status: str, previsao, prioridade: str = "Normal") -> str:
             return "🟥 Atrasada" + (" 🚨" if urgente else "")
         if pv == hoje:
             return "🟧 Vence hoje" + (" 🚨" if urgente else "")
+
     if status == "Aberta":
         return "🟨 Aberta" + (" 🚨" if urgente else "")
     return (status or "—") + (" 🚨" if urgente else "")
@@ -622,8 +588,8 @@ def atraso_dias(previsao) -> str:
     except Exception:
         return "—"
 
+# ---------- Carregamento base de dados da fila ----------
 def load_base():
-    # exclui arquivadas por padrão
     os_rows = run_query("""
         SELECT o.*,
                r.nome AS responsavel_nome,
@@ -638,11 +604,13 @@ def load_base():
     if df.empty:
         return df, pd.DataFrame()
 
+    # normaliza prioridade
     if "prioridade" not in df.columns:
         df["prioridade"] = "Normal"
     else:
         df["prioridade"] = df["prioridade"].fillna("Normal")
 
+    # ajudantes agrupados
     ajuda = run_query("""
         SELECT a.os_id, GROUP_CONCAT(c.nome ORDER BY c.nome SEPARATOR ', ') AS ajudantes
         FROM ajudantes_os a
@@ -655,6 +623,7 @@ def load_base():
     else:
         df["ajudantes"] = None
 
+    # coluna "Colaboradores"
     def colab_str(row):
         partes = []
         for v in [row.get("executor_nome"), row.get("ajudantes")]:
@@ -668,6 +637,7 @@ def load_base():
         return " | ".join(partes) if partes else "—"
     df["Colaboradores"] = df.apply(colab_str, axis=1)
 
+    # rótulo de produto com alerta de urgência
     def produto_fmt(row):
         p = str(row.get("produto") or "—").strip()
         if str(row.get("prioridade","Normal")).lower() == "urgente" and (row.get("status") != "Concluída"):
@@ -677,7 +647,7 @@ def load_base():
 
     return df, df_aj
 
-# helpers de data/hora
+# ---------- Formatadores de data ----------
 def _fmt_date_col(series: pd.Series) -> pd.Series:
     dt = pd.to_datetime(series, errors="coerce")
     out = dt.dt.strftime("%d/%m/%Y")
@@ -688,6 +658,7 @@ def _fmt_datetime_col(series: pd.Series) -> pd.Series:
     out = dt.dt.strftime("%d/%m/%Y %H:%M")
     return out.fillna("—")
 
+# ---------- View de tabela pronta para exibir ----------
 def view_table(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -746,11 +717,12 @@ def view_table(df: pd.DataFrame) -> pd.DataFrame:
         ascending=[True,       True,      False,       False,          True]
     ).drop(columns=["_status_ord","_prio_ord","_ini_sort","_atraso_sort"])
 
+    # completadores
     for c in ["Solicitante/Setor","Resp.","Produto/Equip.","Descrição do Serviço",
               "Status","Colaboradores","!","Prioridade","Atraso (d)"]:
         view[c] = view[c].fillna("—").astype(str)
 
-    # datas: Abertura/Previsão (data), Início/Encerramento (data+hora)
+    # formatação de datas
     view["Abertura"] = _fmt_date_col(view["Abertura"])
     view["Previsão"] = _fmt_date_col(view["Previsão"])
     view["Início"] = _fmt_datetime_col(view["Início"])
@@ -758,22 +730,18 @@ def view_table(df: pd.DataFrame) -> pd.DataFrame:
 
     return view
 
+# ---------- Styler com cores por linha ----------
 def styler_for_table(df_view: pd.DataFrame, compact: bool = True):
-    """
-    Linha inteira bem colorida por Status (forte) e texto sempre branco.
-    Ajuste a força pelo ROW_ALPHA (hex): '66'≈40%, '80'≈50%, '8F'≈56%, '99'≈60%.
-    """
     if df_view.empty:
         return df_view
 
     df = df_view.copy()
 
-    # (opcional) encurta a descrição pra leitura
+    # encurta descrição (melhor leitura)
     if "Descrição do Serviço" in df.columns:
         s = df["Descrição do Serviço"].astype(str)
         df["Descrição do Serviço"] = s.str.slice(0, 120) + s.map(lambda x: "…" if len(x) > 120 else "")
 
-    # Paleta base (dark, light)
     COLORS = {
         "green":  ("#2e7d32", "#66bb6a"),   # Concluída
         "blue":   ("#1565c0", "#42a5f5"),   # Em execução
@@ -783,9 +751,7 @@ def styler_for_table(df_view: pd.DataFrame, compact: bool = True):
         "yellow": ("#ffb300", "#ffd54f"),   # Aberta
         "neutral":("#5f6b7a", "#90a4ae"),
     }
-
-    # Força do preenchimento da LINHA (alpha em HEX)
-    ROW_ALPHA = "8F"   # ← deixe ainda mais forte com "99" (≈60%) ou "B3" (≈70%)
+    ROW_ALPHA = "8F"
 
     def _cat_from_status(s: str) -> str:
         s0 = str(s or "").lower()
@@ -797,101 +763,55 @@ def styler_for_table(df_view: pd.DataFrame, compact: bool = True):
         if "🟨" in s or "aberta" in s0: return "yellow"
         return "neutral"
 
-    # Linha inteira forte + texto branco
     def row_style_all_white(row):
         status_val = row.get("Status", "")
         cat = _cat_from_status(status_val)
-        dark, light = COLORS[cat]
-        # usar a COR ESCURA com alpha alto p/ garantir contraste com texto branco
+        dark, _ = COLORS[cat]
         bg = f"background-color:{dark}{ROW_ALPHA};"
         txt = "color:#FFFFFF;"
         border = "border-bottom: 2px solid rgba(0,0,0,0.25);"
         return [f"{bg} {txt} {border}"] * len(row)
 
-    # Atraso: mantém branco, em negrito (p/ não brigar com a linha)
     def _atraso_style(val: str) -> str:
         try:
             if val == "—": return "color:#FFFFFF;font-weight:700;"
-            int(val)  # valida
+            int(val)
             return "color:#FFFFFF;font-weight:900;text-shadow:0 0 6px rgba(0,0,0,0.25);"
         except Exception:
             return "color:#FFFFFF;"
 
     stl = df.style
     stl = stl.apply(row_style_all_white, axis=1)
-
     if "Atraso (d)" in df.columns:
         stl = stl.applymap(_atraso_style, subset=["Atraso (d)"])
-
     stl = (stl
            .set_properties(**{"white-space":"pre-wrap"})
            .set_table_styles([{"selector":"th","props":[("font-weight","900"),("letter-spacing",".2px")]}]))
-
     if compact:
         stl = stl.set_table_attributes('class="compact-table"')
-
     return stl
 
+# ---------- Renderer de grid ----------
 def grid_with_colors(df: pd.DataFrame, height=520):
     if df.empty:
         st.dataframe(df, use_container_width=True, height=height)
         return
-    if not USE_AGGRID:
-    # ⬅️ se precisar esconder o índice (caso do usuário 'metalurgica'),
-    # zera o índice ANTES de estilizar e avisa o st.dataframe para ocultar.
-        hide_idx = bool(st.session_state.get("_hide_index_ft", False))
-        df_to_show = df.copy()
+
+    hide_idx = bool(st.session_state.get("_hide_index_ft", False))
+    df_to_show = df.copy()
     if hide_idx:
         df_to_show = df_to_show.reset_index(drop=True)
 
     styled = styler_for_table(df_to_show)
-
     try:
-        # Streamlit novo aceita hide_index=True direto:
         st.dataframe(styled, use_container_width=True, height=height, hide_index=hide_idx)
     except Exception:
-        # fallback (versões antigas): já resetamos o índice, então só renderiza
         st.dataframe(styled, use_container_width=True, height=height)
 
-    return
-
-
-    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
-    gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_default_column(resizable=True, sortable=True, filter=True)
-    gb.configure_column("!", width=60)
-    gb.configure_column("Nº OS", width=80)
-    gb.configure_column("Abertura", width=110)
-    gb.configure_column("Resp.", width=140)
-    gb.configure_column("Produto/Equip.", width=200)
-    gb.configure_column("Início", width=150)
-    gb.configure_column("Previsão", width=110)
-    gb.configure_column("Status", width=160)
-    gb.configure_column("Solicitante/Setor", width=160)
-    gb.configure_column("Descrição do Serviço", width=340)
-    gb.configure_column("Colaboradores", width=260)
-    row_style = JsCode("""
-    function(params) {
-      const s = params.data.Status;
-      if (!s) return null;
-      if (s.indexOf('🟨') === 0) return { 'backgroundColor': '#FFF6BF' };
-      if (s.indexOf('🟦') === 0) return { 'backgroundColor': '#CFF4FC' };
-      if (s.indexOf('🟥') === 0) return { 'backgroundColor': '#FDE2E2' };
-      if (s.indexOf('🟩') === 0) return { 'backgroundColor': '#E6F4EA' };
-      if (s.indexOf('🟧') === 0) return { 'backgroundColor': '#FFE6C8' };
-      return null;
-    }
-    """)
-    go_opts = gb.build()
-    go_opts["getRowStyle"] = row_style
-    AgGrid(df, gridOptions=go_opts, update_mode=GridUpdateMode.NO_UPDATE,
-           allow_unsafe_jscode=True, fit_columns_on_grid_load=False,
-           height=height, theme="balham")
-
+# ---------- Listas auxiliares ----------
 def listar_colaboradores():
     return pd.DataFrame(run_query("SELECT id, nome, status FROM colaboradores ORDER BY nome") or [])
 
-# refs detalhadas p/ exclusão segura
 def colaborador_refs_detalhe(colab_id: int) -> dict:
     active_exec = run_query("SELECT COUNT(*) AS c FROM ordens_servico WHERE executor_id=%s AND status!='Concluída'", (colab_id,))
     active_aj = run_query("""
@@ -910,9 +830,7 @@ def colaborador_refs_detalhe(colab_id: int) -> dict:
         "concluidas": int((done_exec or [{"c":0}])[0]["c"]) + int((done_aj or [{"c":0}])[0]["c"])
     }
 
-# ==============================
-# Caches de alto impacto
-# ==============================
+# ---------- Caches de alto impacto ----------
 @st.cache_data(ttl=10, show_spinner=False)
 def _cached_load_base():
     return load_base()
@@ -925,19 +843,21 @@ def _cached_listar_colaboradores():
 def _cached_pending_info():
     row = run_query("SELECT COUNT(*) AS c, COALESCE(MAX(id),0) AS max_id FROM solicitacoes_os WHERE status='Pendente'") or [{"c": 0, "max_id": 0}]
     return int(row[0]["c"]), int(row[0]["max_id"])
+# ==============================
+# Parte 3 — Login, Menu Lateral e Controle de Sessão
+# ==============================
 
-# ==============================
-# Barra lateral: Login/Logout + Menu
-# ==============================
+# ---- Sidebar: Acesso ----
 st.sidebar.title("Acesso")
 
-# Logo pequena no sidebar (apenas na tela de login)
+# Logo pequena no sidebar (somente tela de login)
 if "user" not in st.session_state:
     try:
         st.sidebar.image("logo_bakof.png", width=250)
     except Exception:
         pass
 
+# Controle de tentativas
 if "login_attempts" not in st.session_state:
     st.session_state["login_attempts"] = 0
 if "login_block_until" not in st.session_state:
@@ -947,6 +867,7 @@ def _login_disponivel():
     until = st.session_state["login_block_until"]
     return (until is None) or (datetime.now() >= until)
 
+# ---- Tela de Login ----
 if "user" not in st.session_state:
     with st.sidebar.form("form_login"):
         user_in = st.text_input("Usuário")
@@ -967,55 +888,33 @@ if "user" not in st.session_state:
                     st.session_state["login_block_until"] = datetime.now() + timedelta(minutes=2)
                 st.sidebar.error("Usuário ou senha inválidos.")
 
-    # --- CONTEÚDO DA PÁGINA DE LOGIN (lado direito) ---
+    # ---- Conteúdo da página (lado direito) quando não logado ----
     st.markdown("""
     <style>
     .login-hero {
-    background: linear-gradient(135deg, rgba(0,87,184,.20), rgba(0,174,239,.12));
-    border: 1px solid rgba(255,255,255,.12);
-    border-radius: 14px;
-    padding: 24px;
-    box-shadow: 0 8px 22px rgba(0,0,0,.35);
-    backdrop-filter: blur(3px);
+      background: linear-gradient(135deg, rgba(0,87,184,.20), rgba(0,174,239,.12));
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 14px;
+      padding: 24px; box-shadow: 0 8px 22px rgba(0,0,0,.35); backdrop-filter: blur(3px);
     }
     .login-card {
-    background: rgba(255,255,255,.05);
-    border: 1px solid rgba(255,255,255,.12);
-    border-radius: 12px;
-    padding: 16px;
-    margin-top: 12px;
+      background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
+      border-radius: 12px; padding: 16px; margin-top: 12px;
     }
-    .login-kpi {
-    text-align:center;
-    background: rgba(255,255,255,.06);
-    border: 1px solid rgba(255,255,255,.10);
-    border-radius: 12px;
-    padding: 14px 10px;
-    box-shadow: inset 0 0 8px rgba(0,0,0,.25);
-    }
-    .login-kpi h3 {
-    margin: 0;
-    font-size: 1.9rem;
-    font-weight: 800;
-    color: #00AEEF;
-    }
-    .login-kpi p {
-    margin: 0;
-    color: #E0E0E0;
-    font-size: .85rem;
-    letter-spacing: .5px;
-    }
+    .login-kpi { text-align:center; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.10);
+      border-radius: 12px; padding: 14px 10px; box-shadow: inset 0 0 8px rgba(0,0,0,.25); }
+    .login-kpi h3 { margin:0; font-size:1.9rem; font-weight:800; color:#00AEEF; }
+    .login-kpi p { margin:0; color:#E0E0E0; font-size:.85rem; letter-spacing:.5px; }
     </style>
     """, unsafe_allow_html=True)
 
     col_main, col_side = st.columns([2.2, 1.1])
-
     with col_main:
         st.markdown('<div class="login-hero">', unsafe_allow_html=True)
         st.markdown("### 👋 Bem-vindo à Fila de Trabalho — Bakof Tec")
         st.caption("Visualize informações rápidas e acesse orientações sobre o sistema.")
 
-        # ===== KPIs por SQL direto (robusto e leve)
+        # KPIs rápidos (tolerante a erro)
         try:
             row = run_query("""
                 SELECT
@@ -1033,30 +932,25 @@ if "user" not in st.session_state:
             total_abertas = total_exec = total_conc = 0
 
         k1, k2, k3 = st.columns(3)
-        with k1:
-            st.markdown(f'<div class="login-kpi"><h3>{total_abertas}</h3><p>Abertas</p></div>', unsafe_allow_html=True)
-        with k2:
-            st.markdown(f'<div class="login-kpi"><h3>{total_exec}</h3><p>Em execução</p></div>', unsafe_allow_html=True)
-        with k3:
-            st.markdown(f'<div class="login-kpi"><h3>{total_conc}</h3><p>Concluídas</p></div>', unsafe_allow_html=True)
+        with k1: st.markdown(f'<div class="login-kpi"><h3>{total_abertas}</h3><p>Abertas</p></div>', unsafe_allow_html=True)
+        with k2: st.markdown(f'<div class="login-kpi"><h3>{total_exec}</h3><p>Em execução</p></div>', unsafe_allow_html=True)
+        with k3: st.markdown(f'<div class="login-kpi"><h3>{total_conc}</h3><p>Concluídas</p></div>', unsafe_allow_html=True)
 
-        # ===== Guia rápido
         st.markdown(
-            '<div class="login-card">'
-            "<b>📋 Como solicitar uma OS</b><br>"
-            "1️⃣ Faça login<br>"
-            "2️⃣ Vá até <i>📝 Solicitar OS</i><br>"
-            "3️⃣ Preencha e envie<br><br>"
-            "Acompanhe o andamento em <i>📋 Fila de Trabalho</i>."
-            "</div>",
+            '<div class="login-card"><b>📋 Como solicitar uma OS</b><br>'
+            '1️⃣ Faça login<br>'
+            '2️⃣ Vá até <i>📝 Solicitar OS</i><br>'
+            '3️⃣ Preencha e envie<br><br>'
+            'Acompanhe o andamento em <i>📋 Fila de Trabalho</i>.'
+            '</div>',
             unsafe_allow_html=True
         )
 
-        # ===== Últimas 5 OS (somente leitura, opcional)
+        # Últimas 5 OS (somente leitura)
         try:
             ultimas = run_query("""
                 SELECT id, produto, status,
-                    DATE_FORMAT(data_abertura,'%d/%m/%Y') AS abertura
+                       DATE_FORMAT(data_abertura,'%d/%m/%Y') AS abertura
                 FROM ordens_servico
                 WHERE COALESCE(arquivada,0)=0
                 ORDER BY id DESC
@@ -1087,17 +981,18 @@ if "user" not in st.session_state:
             "• E-mail: gabriel.frizon@bakof.com.br<br>"
             "</div>",
             unsafe_allow_html=True
-    )
+        )
 
     st.stop()
-else:
-    u = st.session_state["user"]
-    st.sidebar.write(f"**{u['nome']}** — {ROLES.get(u['role'], u['role'])}")
-    if st.sidebar.button("Sair"):
-        auth_logout()
-        st.rerun()
 
-# Menu por perfil
+# ---- Logado: infos rápidas + sair ----
+u = st.session_state["user"]
+st.sidebar.write(f"**{u['nome']}** — {ROLES.get(u['role'], u['role'])}")
+if st.sidebar.button("Sair"):
+    auth_logout()
+    st.rerun()
+
+# ---- Menu por perfil ----
 if u["role"] == "SOLICITANTE":
     menu_ops = ["📋 Fila de Trabalho", "✅ Concluídas", "📝 Solicitar OS"]
 elif u["role"] == "OPERADOR":
@@ -1105,12 +1000,13 @@ elif u["role"] == "OPERADOR":
 else:  # ADMIN
     menu_ops = ["📋 Fila de Trabalho", "✅ Concluídas", "📝 Solicitações", "🔧 Administração"]
 
+# Sempre disponível
 if "🔑 Minha Senha" not in menu_ops:
     menu_ops.append("🔑 Minha Senha")
 
+# Navegação programática (ex.: refresh_now('Solicitações'))
 if "menu" not in st.session_state:
     st.session_state.menu = menu_ops[0]
-
 if "_nav_to" in st.session_state:
     try:
         alvo = next(opt for opt in menu_ops if st.session_state["_nav_to"] in opt)
@@ -1120,12 +1016,13 @@ if "_nav_to" in st.session_state:
     finally:
         st.session_state.pop("_nav_to", None)
 
+# ---- Badge de pendências para ADMIN + autorefresh leve ----
 def _get_pending_info():
     return _cached_pending_info()
 
 if u["role"] == "ADMIN":
     st_autorefresh(interval=REFRESH_ADMIN_MS, key="autorefresh_admin_notify")
-    pend_count, pend_max_id = _cached_pending_info()
+    pend_count, pend_max_id = _get_pending_info()
     last_seen = st.session_state.get("last_seen_pend_max_id", 0)
 
     if pend_count > 0:
@@ -1143,25 +1040,21 @@ if u["role"] == "ADMIN":
             st.sidebar.warning(f"🔔 Novas solicitações: {pend_count}")
         st.session_state["last_seen_pend_max_id"] = pend_max_id
 
+# ---- Seleção do menu ----
 menu = st.sidebar.radio("Menu", menu_ops, key="menu")
 
+# Autorefresh na fila (quando página ativa)
 if menu == "📋 Fila de Trabalho":
     st_autorefresh(interval=REFRESH_FILA_MS, key="autorefresh_fila")
 
-# ==============================
-# Util: range do mês (para arquivar robusto)
-# ==============================
+# Util para limites mensais (usado em Concluídas)
 def month_bounds_from_str(ym: str):
     y, m = map(int, ym.split("-"))
     start = datetime(y, m, 1, 0, 0, 0)
-    if m == 12:
-        end = datetime(y + 1, 1, 1, 0, 0, 0)
-    else:
-        end = datetime(y, m + 1, 1, 0, 0, 0)
+    end = datetime(y + (m // 12), (m % 12) + 1, 1, 0, 0, 0)
     return start, end
-
 # ==============================
-# Páginas
+# Parte 4 — Páginas principais
 # ==============================
 
 # ---------- FILA ----------
@@ -1179,10 +1072,10 @@ if menu == "📋 Fila de Trabalho":
     with fcol3:
         termo_busca = st.text_input("Busca livre (produto, descrição, solicitante, tipo...)").strip()
 
-    # >>>>>> USAR CACHE
+    # Base (cache)
     df_base, _ = _cached_load_base()
 
-    # Métricas seguras (quando não há OS, não há coluna 'status')
+    # Métricas seguras
     if df_base.empty or "status" not in df_base.columns:
         total_abertas = total_exec = total_conc = 0
     else:
@@ -1196,7 +1089,7 @@ if menu == "📋 Fila de Trabalho":
     c3.metric("✅ Concluídas", total_conc)
     st.caption("A coluna **!** mostra urgência (🚨). A coluna **Status** usa cor/emoji.")
 
-    # Filtros seguros
+    # Filtros
     df_fila = df_base.copy()
     if not df_fila.empty:
         if filtro_status and "status" in df_fila.columns:
@@ -1205,38 +1098,30 @@ if menu == "📋 Fila de Trabalho":
             df_fila = df_fila[df_fila["responsavel_nome"].isin(filtro_resp)]
         if termo_busca:
             t = termo_busca.lower()
-            possiveis = ["id","produto","descricao","solicitante","tipo_servico",
-                        "responsavel_nome","executor_nome","ajudantes"]
+            possiveis = ["id","produto","descricao","solicitante","tipo_servico","responsavel_nome","executor_nome","ajudantes"]
             cols_busca = [c for c in possiveis if c in df_fila.columns]
             if cols_busca:
-                df_fila = df_fila[df_fila.apply(
-                    lambda row: any(t in str(row.get(c, "")).lower() for c in cols_busca),
-                    axis=1
-                )]
+                df_fila = df_fila[df_fila.apply(lambda row: any(t in str(row.get(c, "")).lower() for c in cols_busca), axis=1)]
 
-    # Montagem da tabela (também segura)
+    # Montagem da tabela
     if df_fila.empty or "status" not in df_fila.columns:
         table_fila = pd.DataFrame()
     else:
         df_fila_nao_conc = df_fila[df_fila["status"] != "Concluída"].copy()
         table_fila = view_table(df_fila_nao_conc)
 
-        # 🔽 Para o usuário 'metalurgica': remover "!", "Encerramento" e "Atraso (d)"
-    # e esconder a coluna de índice (os números da esquerda)
+    # Para o usuário 'metalurgica': esconder algumas colunas e o índice
     if not table_fila.empty and is_metalurgica_user():
-        drop_cols = ["!", "Encerramento", "Atraso (d)"]
-        drop_cols = [c for c in drop_cols if c in table_fila.columns]
+        drop_cols = [c for c in ["!", "Encerramento", "Atraso (d)"] if c in table_fila.columns]
         table_fila = table_fila.drop(columns=drop_cols)
-        # marcamos numa flag pra esconder o índice lá no renderer
         st.session_state["_hide_index_ft"] = True
     else:
         st.session_state["_hide_index_ft"] = False
 
-    # Renderização
+    # Render
     if table_fila.empty:
         st.info("Nenhuma OS aberta ou em execução.")
     else:
-        # >>>>>> GERAR EXCEL SÓ QUANDO CLICAR
         if st.button("⬇️ Gerar Excel desta fila", use_container_width=True, key="btn_build_xlsx_fila"):
             buf = io.BytesIO()
             with pd.ExcelWriter(buf, engine="xlsxwriter") as wr:
@@ -1248,10 +1133,10 @@ if menu == "📋 Fila de Trabalho":
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 key="dl_fila"
-        )
-    grid_with_colors(table_fila, height=520)
+            )
+        grid_with_colors(table_fila, height=520)
 
-        # ======= AÇÕES (OPERADOR e ADMIN) =======
+    # ======= AÇÕES (OPERADOR e ADMIN) =======
     if u["role"] in ("OPERADOR", "ADMIN"):
         st.divider()
         st.subheader("Ações")
@@ -1268,21 +1153,14 @@ if menu == "📋 Fila de Trabalho":
         with top_left:
             st.markdown('<div class="card">', unsafe_allow_html=True)
             st.markdown("### ▶️ Iniciar Ordem de serviço")
-
             with st.form("form_iniciar_os", clear_on_submit=False):
-                if not abertas_ids:
-                    st.selectbox("Ordens (Abertas)", ["—"], index=0, disabled=True, key="sb_ini_os_disabled")
-                else:
-                    st.selectbox("Ordens (Abertas)", abertas_ids, index=0, key="sb_ini_os")
-                if df_ociosos.empty:
-                    st.selectbox("Executor (ociosos)", ["—"], disabled=True)
-                else:
-                    st.selectbox("Executor (ociosos)", df_ociosos["nome"].tolist(), key="sb_ini_exec")
+                st.selectbox("Ordens (Abertas)", abertas_ids or ["—"], index=0, key="sb_ini_os", disabled=(not abertas_ids))
+                st.selectbox("Executor (ociosos)", df_ociosos["nome"].tolist() if not df_ociosos.empty else ["—"], key="sb_ini_exec", disabled=df_ociosos.empty)
                 submit_ini = st.form_submit_button("Iniciar", use_container_width=True)
 
             if submit_ini:
                 os_iniciar = st.session_state.get("sb_ini_os")
-                if not os_iniciar:
+                if not abertas_ids or not os_iniciar:
                     st.warning("Escolha uma OS aberta.")
                 elif df_ociosos.empty:
                     st.warning("Não há executores ociosos.")
@@ -1290,7 +1168,6 @@ if menu == "📋 Fila de Trabalho":
                     try:
                         nome_exec = st.session_state.get("sb_ini_exec")
                         exec_id = int(df_ociosos.loc[df_ociosos["nome"] == nome_exec, "id"].iloc[0])
-
                         aff1 = exec_rowcount("UPDATE colaboradores SET status='Em Execução' WHERE id=%s AND status='Ocioso'", (exec_id,))
                         if aff1 == 0:
                             st.warning(f"{nome_exec} não está mais ocioso.")
@@ -1308,7 +1185,6 @@ if menu == "📋 Fila de Trabalho":
                         else:
                             st.success(f"OS {os_iniciar} iniciada por {nome_exec}.")
                             refresh_now("📋 Fila de Trabalho")
-
                     except Exception as e:
                         st.error(f"Erro ao iniciar: {e}")
             st.markdown('</div>', unsafe_allow_html=True)
@@ -1317,19 +1193,15 @@ if menu == "📋 Fila de Trabalho":
         with top_right:
             st.markdown('<div class="card">', unsafe_allow_html=True)
             st.markdown("### ✅ Encerrar Ordem de serviço")
-
             with st.form("form_encerrar_os", clear_on_submit=False):
-                if not em_exec_ids:
-                    st.selectbox("Ordens (Em execução)", ["—"], index=0, disabled=True, key="sb_end_os_disabled")
-                else:
-                    st.selectbox("Ordens (Em execução)", em_exec_ids, index=0, key="sb_end_os")
+                st.selectbox("Ordens (Em execução)", em_exec_ids or ["—"], index=0, key="sb_end_os", disabled=(not em_exec_ids))
                 st.checkbox("Confirmo o encerramento desta OS", value=False, key="chk_end_confirm")
                 submit_end = st.form_submit_button("Encerrar", use_container_width=True)
 
             if submit_end:
                 os_encerrar = st.session_state.get("sb_end_os")
                 confirmar = bool(st.session_state.get("chk_end_confirm", False))
-                if not os_encerrar:
+                if not em_exec_ids or not os_encerrar:
                     st.warning("Escolha uma OS em execução.")
                 elif not confirmar:
                     st.warning("Marque a confirmação de encerramento.")
@@ -1358,7 +1230,8 @@ if menu == "📋 Fila de Trabalho":
                             cid = r["colaborador_id"]
                             tem_exec = run_query("SELECT 1 FROM ordens_servico WHERE executor_id=%s AND status='Em Execução' LIMIT 1", (cid,))
                             tem_aj   = run_query("""
-                                SELECT 1 FROM ajudantes_os a
+                                SELECT 1
+                                FROM ajudantes_os a
                                 JOIN ordens_servico o ON o.id=a.os_id
                                 WHERE a.colaborador_id=%s AND o.status='Em Execução' LIMIT 1
                             """, (cid,))
@@ -1371,36 +1244,23 @@ if menu == "📋 Fila de Trabalho":
                         st.error(f"Erro ao encerrar: {e}")
             st.markdown('</div>', unsafe_allow_html=True)
 
-        # -------- ADICIONAR --------
+        # -------- ADICIONAR AJUDANTE --------
         with bottom_left:
             st.markdown('<div class="card">', unsafe_allow_html=True)
             st.markdown("### ➕ Adicionar colaborador")
-
             with st.form("form_add_col", clear_on_submit=False):
-                if not em_exec_ids:
-                    st.selectbox("Ordens (Em execução)", ["—"], index=0, disabled=True, key="sb_add_os_disabled")
-                    os_add_val = None
-                else:
-                    st.selectbox("Ordens (Em execução)", em_exec_ids, index=0, key="sb_add_os")
-                    os_add_val = st.session_state.get("sb_add_os")
-
+                st.selectbox("Ordens (Em execução)", em_exec_ids or ["—"], index=0, key="sb_add_os", disabled=(not em_exec_ids))
                 df_colab_add = pd.DataFrame(
                     run_query("SELECT id, nome, status FROM colaboradores WHERE status!='Inativo' ORDER BY nome") or []
                 )
-                if df_colab_add.empty:
-                    st.selectbox("Colaborador (pode estar ocioso ou em execução)", ["—"], disabled=True, key="sb_add_col_disabled")
-                else:
-                    st.selectbox(
-                        "Colaborador (pode estar ocioso ou em execução)",
-                        df_colab_add["nome"].tolist(),
-                        key="sb_add_col"
-                    )
-
+                st.selectbox("Colaborador (pode estar ocioso ou em execução)",
+                             df_colab_add["nome"].tolist() if not df_colab_add.empty else ["—"],
+                             key="sb_add_col", disabled=df_colab_add.empty)
                 submit_add = st.form_submit_button("Adicionar", use_container_width=True)
 
             if submit_add:
-                os_add_col = os_add_val
-                if not os_add_col:
+                os_add_val = st.session_state.get("sb_add_os")
+                if not em_exec_ids or not os_add_val:
                     st.warning("Escolha a OS.")
                 elif df_colab_add.empty:
                     st.warning("Não há colaboradores disponíveis.")
@@ -1416,23 +1276,18 @@ if menu == "📋 Fila de Trabalho":
 
                             ok_os = run_query(
                                 "SELECT 1 FROM ordens_servico WHERE id=%s AND status='Em Execução' AND COALESCE(arquivada,0)=0 LIMIT 1",
-                                (int(os_add_col),)
+                                (int(os_add_val),)
                             )
                             if not ok_os:
                                 st.warning("A OS não está mais em execução.")
                                 refresh_now("📋 Fila de Trabalho")
 
                             if colab_status == "Ocioso":
-                                exec_rowcount(
-                                    "UPDATE colaboradores SET status='Em Execução' WHERE id=%s AND status='Ocioso'",
-                                    (colab_id,)
-                                )
+                                exec_rowcount("UPDATE colaboradores SET status='Em Execução' WHERE id=%s AND status='Ocioso'", (colab_id,))
 
                             try:
-                                run_tx([
-                                    ("INSERT INTO ajudantes_os (os_id, colaborador_id) VALUES (%s, %s)", (int(os_add_col), colab_id)),
-                                ])
-                                st.success(f"{nome_aj} adicionado na OS {os_add_col}.")
+                                run_tx([("INSERT INTO ajudantes_os (os_id, colaborador_id) VALUES (%s, %s)", (int(os_add_val), colab_id))])
+                                st.success(f"{nome_aj} adicionado na OS {os_add_val}.")
                                 refresh_now("📋 Fila de Trabalho")
                             except Exception as e:
                                 if "Duplicate" in str(e):
@@ -1444,46 +1299,33 @@ if menu == "📋 Fila de Trabalho":
                         st.error(f"Erro ao adicionar: {e}")
             st.markdown("</div>", unsafe_allow_html=True)
 
-                    # -------- REMOVER (corrigido) --------
-    with bottom_right:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### 🗑️ Remover colaborador")
+        # -------- REMOVER AJUDANTE --------
+        with bottom_right:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.markdown("### 🗑️ Remover colaborador")
 
-        # 1) Seleção da OS — FORA do form (para disparar rerun ao mudar)
-        if not em_exec_ids:
-            st.selectbox("OS (Em execução)", ["—"], index=0, disabled=True, key="sb_rm_os_disabled")
-            os_rm_val = None
-        else:
-            os_rm_val = st.selectbox("OS (Em execução)", em_exec_ids, index=0, key="sb_rm_os")
+            os_rm_val = st.selectbox("OS (Em execução)", em_exec_ids or ["—"], index=0, key="sb_rm_os", disabled=(not em_exec_ids))
+            prev_os = st.session_state.get("_rm_last_os")
+            if prev_os != os_rm_val:
+                st.session_state["_rm_last_os"] = os_rm_val
+                if prev_os:
+                    st.session_state.pop(f"sb_rm_col_{prev_os}", None)
+                if os_rm_val:
+                    st.session_state.pop(f"sb_rm_col_{os_rm_val}", None)
+                st.rerun()
 
-        # Zera seleção do ajudante quando a OS muda
-        prev_os = st.session_state.get("_rm_last_os")
-        if prev_os != os_rm_val:
-            st.session_state["_rm_last_os"] = os_rm_val
-            # limpa qualquer seleção antiga ligada à OS anterior
-            if prev_os:
-                st.session_state.pop(f"sb_rm_col_{prev_os}", None)
-            # também limpa a seleção atual (garantia)
-            if os_rm_val:
-                st.session_state.pop(f"sb_rm_col_{os_rm_val}", None)
-            st.rerun()
+            if not em_exec_ids or not os_rm_val:
+                aj_all = pd.DataFrame()
+            else:
+                aj_all = pd.DataFrame(run_query("""
+                    SELECT a.id AS aj_id, a.os_id, c.nome, a.colaborador_id
+                    FROM ajudantes_os a
+                    JOIN colaboradores c ON c.id = a.colaborador_id
+                    WHERE a.os_id=%s
+                    GROUP BY a.id, a.os_id, c.nome, a.colaborador_id
+                    ORDER BY c.nome
+                """, (int(os_rm_val),)) or [])
 
-        # 2) Busca ajudantes da OS escolhida (já com o valor atualizado)
-        if not os_rm_val:
-            aj_all = pd.DataFrame()
-            st.selectbox("Ajudante", ["—"], disabled=True, key="sb_rm_col_disabled")
-            selected_aj = None
-        else:
-            aj_all = pd.DataFrame(run_query("""
-                SELECT a.id AS aj_id, a.os_id, c.nome, a.colaborador_id
-                FROM ajudantes_os a
-                JOIN colaboradores c ON c.id = a.colaborador_id
-                WHERE a.os_id=%s
-                GROUP BY a.id, a.os_id, c.nome, a.colaborador_id   -- evita repetição visual
-                ORDER BY c.nome
-            """, (int(os_rm_val),)) or [])
-
-            # 3) Form apenas com o select dependente + botão
             with st.form("form_rm_col", clear_on_submit=False):
                 if aj_all.empty:
                     st.selectbox("Ajudante", ["—"], disabled=True, key="sb_rm_col_disabled")
@@ -1491,78 +1333,62 @@ if menu == "📋 Fila de Trabalho":
                 else:
                     options = aj_all.to_dict("records")
                     sel_key = f"sb_rm_col_{os_rm_val}"
-                    selected_aj = st.selectbox(
-                        "Ajudante",
-                        options=options,
-                        format_func=lambda r: r["nome"] if isinstance(r, dict) else str(r),
-                        key=sel_key,
-                    )
-
+                    selected_aj = st.selectbox("Ajudante", options=options,
+                                               format_func=lambda r: r["nome"] if isinstance(r, dict) else str(r),
+                                               key=sel_key)
                 submit_rm = st.form_submit_button("Remover", use_container_width=True)
 
-        # 4) Execução
-        if 'submit_rm' in locals() and submit_rm:
-            if not os_rm_val:
-                st.warning("Escolha a OS.")
-            elif aj_all.empty or not selected_aj:
-                st.warning("Não há ajudantes para remover.")
-            else:
-                try:
-                    aj_id = int(selected_aj["aj_id"])
-                    colab_id_rm = int(selected_aj["colaborador_id"])
+            if submit_rm:
+                if aj_all.empty or not selected_aj:
+                    st.warning("Não há ajudantes para remover.")
+                else:
+                    try:
+                        aj_id = int(selected_aj["aj_id"])
+                        colab_id_rm = int(selected_aj["colaborador_id"])
+                        aff = exec_rowcount("DELETE FROM ajudantes_os WHERE id=%s", (aj_id,))
+                        if aff == 0:
+                            st.info("Esse ajudante já havia sido removido.")
+                            refresh_now("📋 Fila de Trabalho")
 
-                    aff = exec_rowcount("DELETE FROM ajudantes_os WHERE id=%s", (aj_id,))
-                    if aff == 0:
-                        st.info("Esse ajudante já havia sido removido.")
+                        ainda_exec = run_query("SELECT 1 FROM ordens_servico WHERE executor_id=%s AND status='Em Execução' LIMIT 1", (colab_id_rm,))
+                        ainda_aj = run_query("""
+                            SELECT 1
+                            FROM ajudantes_os a
+                            JOIN ordens_servico o ON o.id=a.os_id
+                            WHERE a.colaborador_id=%s AND o.status='Em Execução'
+                            LIMIT 1
+                        """, (colab_id_rm,))
+                        if not ainda_exec and not ainda_aj:
+                            run_query("UPDATE colaboradores SET status='Ocioso' WHERE id=%s", (colab_id_rm,), commit=True)
+
+                        st.success(f"Ajudante removido da OS {os_rm_val}.")
                         refresh_now("📋 Fila de Trabalho")
-
-                    # Se não participa de outra OS em execução, voltar para Ocioso
-                    ainda_exec = run_query(
-                        "SELECT 1 FROM ordens_servico WHERE executor_id=%s AND status='Em Execução' LIMIT 1",
-                        (colab_id_rm,)
-                    )
-                    ainda_aj = run_query("""
-                        SELECT 1
-                        FROM ajudantes_os a
-                        JOIN ordens_servico o ON o.id=a.os_id
-                        WHERE a.colaborador_id=%s AND o.status='Em Execução'
-                        LIMIT 1
-                    """, (colab_id_rm,))
-
-                    if not ainda_exec and not ainda_aj:
-                        run_query("UPDATE colaboradores SET status='Ocioso' WHERE id=%s", (colab_id_rm,), commit=True)
-
-                    st.success(f"Ajudante removido da OS {os_rm_val}.")
-                    refresh_now("📋 Fila de Trabalho")
-
-                except Exception as e:
-                    st.error(f"Erro ao remover: {e}")
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
+                    except Exception as e:
+                        st.error(f"Erro ao remover: {e}")
+            st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown("—")
         if st.button("🔄 Atualizar fila", use_container_width=True):
             refresh_now("📋 Fila de Trabalho")
 
-# ---------- CONCLUÍDAS (com filtro de MÊS estável) ----------
+# ---------- CONCLUÍDAS ----------
 elif menu == "✅ Concluídas":
     st.title("✅ Ordens de serviço Concluídas — Metalúrgica Bakof Tec")
 
-    # Proteção contra base vazia (sem colunas)
     df_base, _ = _cached_load_base()
     if df_base.empty or "status" not in df_base.columns:
         df_done = pd.DataFrame()
     else:
         df_done = df_base[df_base["status"].astype(str) == "Concluída"].copy()
+
     if df_done.empty:
         st.info("Nenhuma OS concluída até o momento.")
     else:
         df_done["data_fim"] = pd.to_datetime(df_done["data_fim"], errors="coerce")
         df_done = df_done.dropna(subset=["data_fim"])
-
         df_done["mes_ano_str"] = df_done["data_fim"].dt.to_period("M").astype(str)
         meses_disp = sorted(df_done["mes_ano_str"].unique().tolist(), reverse=True)
+
         if not meses_disp:
             st.info("Nenhuma OS concluída com data de encerramento válida.")
         else:
@@ -1594,7 +1420,7 @@ elif menu == "✅ Concluídas":
             mes_sel = st.session_state["mes_concluidas"]
             df_mes = df_done[df_done["mes_ano_str"] == mes_sel].copy()
 
-            # ----- ARQUIVAR MÊS EXIBIDO -----
+            # Arquivar mês
             st.divider()
             st.subheader("📦 Arquivar (mês exibido)")
             ano, mes = mes_sel.split("-")
@@ -1643,11 +1469,10 @@ elif menu == "✅ Concluídas":
                     )
                 grid_with_colors(table_mes, height=560)
 
-                # >>>>>> GRÁFICOS SOB DEMANDA
+                # Análises sob demanda
                 st.divider()
                 with st.expander("📈 Mostrar análises (pode demorar)", expanded=False):
                     st.subheader("📈 Análises (mês selecionado)")
-
                     if not df_mes.empty:
                         dados = (df_mes.assign(dia=pd.to_datetime(df_mes["data_fim"]).dt.date)
                                        .groupby(["dia","prioridade"])["id"]
@@ -1669,65 +1494,17 @@ elif menu == "✅ Concluídas":
                                 margin=dict(l=10, r=10, t=40, b=10),
                             )
                             st.plotly_chart(fig, use_container_width=True)
-                    # ======= Limpar OS (somente ADMIN) =======
-        st.divider()
-        st.subheader("🧹 Limpar Ordens de Serviço")
 
-        with st.form("form_limpar_os", clear_on_submit=False):
-            escopo = st.radio(
-                "O que limpar?",
-                ["Apenas não arquivadas", "Todas as OS (inclusive arquivadas)"],
-                index=0,
-                help="Escolha se quer limpar só as que não foram arquivadas ou absolutamente todas."
-            )
-            reset_ai = st.checkbox("Zerar numeração de OS (AUTO_INCREMENT volta para 1)", value=True)
-            st.caption("⚠️ Esta ação é irreversível. Use com cuidado.")
-            confirma = st.text_input("Digite **LIMPAR** para confirmar").strip().upper()
-            btn_limpar = st.form_submit_button("Apagar OS agora", type="primary", use_container_width=True)
+                        df_lt = df_mes.copy()
+                        df_lt["data_abertura"] = pd.to_datetime(df_lt["data_abertura"], errors="coerce")
+                        df_lt["data_fim"] = pd.to_datetime(df_lt["data_fim"], errors="coerce")
+                        df_lt = df_lt.dropna(subset=["data_abertura","data_fim"])
+                        if not df_lt.empty:
+                            df_lt["lead_time_dias"] = (df_lt["data_fim"].dt.date - df_lt["data_abertura"].dt.date).apply(lambda x: x.days)
+                            fig_lt = px.box(df_lt, y="lead_time_dias", points="all", title=f"Lead time (dias) — {mes}/{ano}")
+                            fig_lt.update_layout(margin=dict(l=10, r=10, t=40, b=10), yaxis_title="Dias")
+                            st.plotly_chart(fig_lt, use_container_width=True)
 
-        if btn_limpar:
-            if confirma != "LIMPAR":
-                st.warning("Você precisa digitar **LIMPAR** para confirmar.")
-            else:
-                try:
-                    # Apaga conforme escopo
-                    if escopo == "Apenas não arquivadas":
-                        row = run_query("SELECT COUNT(*) AS c FROM ordens_servico WHERE COALESCE(arquivada,0)=0")
-                        qtd_prev = int((row or [{"c":0}])[0]["c"])
-                        aff_os = exec_rowcount(
-                            "DELETE FROM ordens_servico WHERE COALESCE(arquivada,0)=0"
-                        )
-                    else:
-                        row = run_query("SELECT COUNT(*) AS c FROM ordens_servico")
-                        qtd_prev = int((row or [{"c":0}])[0]["c"])
-                        aff_os = exec_rowcount("DELETE FROM ordens_servico")
-
-                    # Zera auto-incremento se marcado
-                    if reset_ai:
-                        run_query("ALTER TABLE ordens_servico AUTO_INCREMENT = 1", commit=True)
-
-                    # Deixa todos colaboradores Ociosos
-                    exec_rowcount("UPDATE colaboradores SET status='Ocioso' WHERE status <> 'Ocioso'")
-
-                    st.success(f"Limpeza concluída ✅ — OS removidas: {aff_os} (previstas: {qtd_prev}).")
-                    refresh_now("📋 Fila de Trabalho")
-
-                except Exception as e:
-                    st.error(f"Erro ao limpar OS: {e}")
-
-
-                    df_lt = df_mes.copy()
-                    df_lt["data_abertura"] = pd.to_datetime(df_lt["data_abertura"], errors="coerce")
-                    df_lt["data_fim"] = pd.to_datetime(df_lt["data_fim"], errors="coerce")
-                    df_lt = df_lt.dropna(subset=["data_abertura","data_fim"])
-                    if not df_lt.empty:
-                        df_lt["lead_time_dias"] = (df_lt["data_fim"].dt.date - df_lt["data_abertura"].dt.date).apply(lambda x: x.days)
-                        fig_lt = px.box(df_lt, y="lead_time_dias", points="all",
-                                        title=f"Lead time (dias) — {mes}/{ano}")
-                        fig_lt.update_layout(margin=dict(l=10, r=10, t=40, b=10), yaxis_title="Dias")
-                        st.plotly_chart(fig_lt, use_container_width=True)
-
-                    if not df_mes.empty:
                         df_exec = df_mes.copy()
                         df_exec["executor_nome"] = df_exec["executor_nome"].fillna("—")
                         agg = df_exec.groupby("executor_nome")["id"].count().reset_index().rename(columns={"id": "Total"})
@@ -1735,29 +1512,38 @@ elif menu == "✅ Concluídas":
                                           title=f"OS concluídas por executor — {mes}/{ano}")
                         st.plotly_chart(fig_exec, use_container_width=True)
 
-            # ----- ARQUIVAMENTOS RECENTES -----
+            # Limpar OS (atalho aqui também)
             st.divider()
-            st.subheader("🗃️ Arquivamentos recentes")
-            arqs = run_query("""
-                SELECT arquivo_nome, COUNT(*) AS total,
-                       MIN(arquivada_em) AS desde, MAX(arquivada_em) AS ate
-                  FROM ordens_servico
-                 WHERE COALESCE(arquivada,0)=1
-              GROUP BY arquivo_nome
-              ORDER BY MAX(arquivada_em) DESC
-              LIMIT 10
-            """) or []
-            df_arq = pd.DataFrame(arqs)
-            if df_arq.empty:
-                st.caption("Nenhum arquivamento encontrado.")
-            else:
-                df_arq["desde"] = _fmt_datetime_col(df_arq["desde"])
-                df_arq["ate"] = _fmt_datetime_col(df_arq["ate"])
-                st.dataframe(df_arq.rename(columns={
-                    "arquivo_nome":"Nome do arquivamento","total":"Total de OS","desde":"Primeiro registro","ate":"Último registro"
-                }), use_container_width=True, height=300)
+            st.subheader("🧹 Limpar Ordens de Serviço")
+            with st.form("form_limpar_os", clear_on_submit=False):
+                escopo = st.radio("O que limpar?", ["Apenas não arquivadas", "Todas as OS (inclusive arquivadas)"], index=0)
+                reset_ai = st.checkbox("Zerar numeração de OS (AUTO_INCREMENT volta para 1)", value=True)
+                st.caption("⚠️ Esta ação é irreversível. Use com cuidado.")
+                confirma = st.text_input("Digite **LIMPAR** para confirmar").strip().upper()
+                btn_limpar = st.form_submit_button("Apagar OS agora", type="primary", use_container_width=True)
+            if btn_limpar:
+                if confirma != "LIMPAR":
+                    st.warning("Você precisa digitar **LIMPAR** para confirmar.")
+                else:
+                    try:
+                        if escopo == "Apenas não arquivadas":
+                            row = run_query("SELECT COUNT(*) AS c FROM ordens_servico WHERE COALESCE(arquivada,0)=0")
+                            qtd_prev = int((row or [{"c":0}])[0]["c"])
+                            aff_os = exec_rowcount("DELETE FROM ordens_servico WHERE COALESCE(arquivada,0)=0")
+                        else:
+                            row = run_query("SELECT COUNT(*) AS c FROM ordens_servico")
+                            qtd_prev = int((row or [{"c":0}])[0]["c"])
+                            aff_os = exec_rowcount("DELETE FROM ordens_servico")
 
-# ---------- SOLICITANTE: criar solicitação ----------
+                        if reset_ai:
+                            run_query("ALTER TABLE ordens_servico AUTO_INCREMENT = 1", commit=True)
+                        exec_rowcount("UPDATE colaboradores SET status='Ocioso' WHERE status <> 'Ocioso'")
+                        st.success(f"Limpeza concluída ✅ — OS removidas: {aff_os} (previstas: {qtd_prev}).")
+                        refresh_now("📋 Fila de Trabalho")
+                    except Exception as e:
+                        st.error(f"Erro ao limpar OS: {e}")
+
+# ---------- SOLICITAR OS ----------
 elif menu == "📝 Solicitar OS":
     if not require_roles({"SOLICITANTE"}):
         st.stop()
@@ -1773,7 +1559,6 @@ elif menu == "📝 Solicitar OS":
             previsao = st.date_input("Previsão (estimativa)")
         prioridade = st.selectbox("Prioridade", ["Normal", "Urgente"], index=0)
         descricao = st.text_area("Descrição do serviço")
-
         submit_sol = st.form_submit_button("Enviar solicitação", type="primary")
     if submit_sol:
         try:
@@ -1782,7 +1567,7 @@ elif menu == "📝 Solicitar OS":
                 (data_solicitacao, solicitante_user_id, solicitante_setor, produto, tipo_servico, descricao, previsao, prioridade, status)
                 VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, 'Pendente')
             """, (u["id"], solicitante_setor, produto, tipo_servico, descricao, previsao, prioridade), commit=True)
-            st.success("Solicitação enviado! Um administrador irá analisar.")
+            st.success("Solicitação enviada! Um administrador irá analisar.")
             refresh_now("📝 Solicitar OS")
         except Exception as e:
             st.error(f"Erro ao enviar: {e}")
@@ -1808,7 +1593,7 @@ elif menu == "📝 Solicitar OS":
             "tipo_servico":"Tipo","prioridade":"Prioridade","status":"Status","analisado_em":"Analisado em"
         }), use_container_width=True, height=420)
 
-# ---------- ADMIN: aprovar/rejeitar solicitações ----------
+# ---------- SOLICITAÇÕES (ADMIN) ----------
 elif menu == "📝 Solicitações":
     if not require_roles({"ADMIN"}):
         st.stop()
@@ -1844,13 +1629,11 @@ elif menu == "📝 Solicitações":
             pick = st.selectbox("Solicitação", ids, index=0 if ids else None)
             resp_row = run_query("SELECT id, nome FROM colaboradores WHERE status!='Inativo' ORDER BY nome") or []
             mapa_resp = {r["nome"]: r["id"] for r in resp_row}
-
             col1, col2 = st.columns(2)
             with col1:
                 resp_nome = st.selectbox("Definir Responsável (colaborador)", list(mapa_resp.keys()) if mapa_resp else ["—"])
             with col2:
                 acao = st.radio("Ação", ["Aprovar", "Rejeitar"], horizontal=True)
-
             submit_ap = st.form_submit_button("Confirmar análise", use_container_width=True)
 
         if submit_ap and pick is not None:
@@ -1863,7 +1646,6 @@ elif menu == "📝 Solicitações":
                     """, (u["id"], pick), commit=True)
                     st.success(f"Solicitação {pick} rejeitada.")
                     refresh_now("📝 Solicitações")
-
                 else:
                     sol = run_query("SELECT * FROM solicitacoes_os WHERE id=%s", (pick,))
                     if not sol:
@@ -1881,7 +1663,7 @@ elif menu == "📝 Solicitações":
                                   VALUES (CURDATE(), %s, %s, %s, %s, %s, %s, %s, 'Aberta')
                                  """, (s["solicitante_setor"], resp_id, s["produto"], s["tipo_servico"],
                                        s["descricao"], s["previsao"], s["prioridade"])),
-                                # ✅ Corrige bug: garante que o responsável apareça nas listas de executor/ajudante
+                                # garante que o responsável não fique Inativo
                                 ("UPDATE colaboradores SET status='Ocioso' WHERE id=%s AND status='Inativo'", (resp_id,)),
                                 ("UPDATE solicitacoes_os SET status='Aprovada', analisado_por=%s, analisado_em=NOW() WHERE id=%s",
                                  (u["id"], pick))
@@ -1890,6 +1672,9 @@ elif menu == "📝 Solicitações":
                             refresh_now("📋 Fila de Trabalho")
             except Exception as e:
                 st.error(f"Erro ao analisar: {e}")
+# ==============================
+# Parte 5 — Administração, Colaboradores, Minha Senha e Rodapé
+# ==============================
 
 # ---------- ADMIN: Administração geral ----------
 elif menu == "🔧 Administração":
@@ -1946,11 +1731,13 @@ elif menu == "🔧 Administração":
             df_g["prioridade"] = "Normal"
         df_g["dia"] = pd.to_datetime(df_g["dia"])
         df_g["semana"] = df_g["dia"].dt.to_period("W").apply(lambda r: r.start_time)
+
         sem = (df_g.groupby(["semana","prioridade"])["total"].sum().reset_index())
         pivot = sem.pivot_table(index="semana", columns="prioridade", values="total", aggfunc="sum").fillna(0)
         pivot = pivot.rename(columns={"Normal":"Normal", "Urgente":"Urgente"}).sort_index()
         serie_total = pivot.sum(axis=1)
         mm4 = serie_total.rolling(4).mean()
+
         fig = go.Figure()
         if "Normal" in pivot.columns:
             fig.add_trace(go.Bar(x=pivot.index, y=pivot["Normal"], name="Normal"))
@@ -1969,11 +1756,10 @@ elif menu == "🔧 Administração":
         )
         st.plotly_chart(fig, use_container_width=True)
 
-            # ======= Limpar OS (somente ADMIN) =======
+    # ----- Limpar OS (somente ADMIN) -----
     st.divider()
     st.subheader("🧹 Limpar Ordens de Serviço")
-
-    with st.form("form_limpar_os", clear_on_submit=False):
+    with st.form("form_limpar_os_admin", clear_on_submit=False):
         escopo = st.radio(
             "O que limpar?",
             ["Apenas não arquivadas", "Todas as OS (inclusive arquivadas)"],
@@ -1990,39 +1776,21 @@ elif menu == "🔧 Administração":
             st.warning("Você precisa digitar **LIMPAR** para confirmar.")
         else:
             try:
-                # Apaga somente pelo escopo escolhido
                 if escopo == "Apenas não arquivadas":
-                    # Conta antes pra informar quantas serão removidas
                     row = run_query("SELECT COUNT(*) AS c FROM ordens_servico WHERE COALESCE(arquivada,0)=0")
                     qtd_prev = int((row or [{"c":0}])[0]["c"])
-
-                    aff_os = exec_rowcount(
-                        "DELETE FROM ordens_servico WHERE COALESCE(arquivada,0)=0"
-                    )
-                    # ajudantes_os referentes são removidos por ON DELETE CASCADE
-
+                    aff_os = exec_rowcount("DELETE FROM ordens_servico WHERE COALESCE(arquivada,0)=0")
                 else:
                     row = run_query("SELECT COUNT(*) AS c FROM ordens_servico")
                     qtd_prev = int((row or [{"c":0}])[0]["c"])
-
-                    # Apaga tudo
                     aff_os = exec_rowcount("DELETE FROM ordens_servico")
-                    # ajudantes_os referentes são removidos por ON DELETE CASCADE
-
-                # Zera auto-incremento se marcado
                 if reset_ai:
                     run_query("ALTER TABLE ordens_servico AUTO_INCREMENT = 1", commit=True)
-
-                # Deixa todos colaboradores como Ociosos
                 exec_rowcount("UPDATE colaboradores SET status='Ocioso' WHERE status <> 'Ocioso'")
-
                 st.success(f"Limpeza concluída ✅ — OS removidas: {aff_os} (previstas: {qtd_prev}).")
-                # Volta para a fila para o usuário ver a lista vazia
                 refresh_now("📋 Fila de Trabalho")
-
             except Exception as e:
                 st.error(f"Erro ao limpar OS: {e}")
-
 
     # ======= Gestão de Colaboradores (DENTRO de '🔧 Administração') =======
     st.divider()
